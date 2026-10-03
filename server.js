@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import cors from "cors";
 import mongoData from "./mongoData.js";
 import Pusher from "pusher";
+import { getFirebaseUser, requireFirebaseAuth } from "./firebaseAdmin.js";
 
 //app config//
 const app = express();
@@ -49,6 +50,7 @@ app.use(
     type: ["application/json", "application/*+json"],
   }),
 );
+app.use(express.urlencoded({ extended: false }));
 app.use(cors());
 
 //DB config//
@@ -64,14 +66,25 @@ const startConversationWatch = async () => {
   changeStream = stream;
 
   stream.on("change", async (change) => {
-    const event = change.operationType === "insert" ? "newChannel" :
-      change.operationType === "update" ? "newMessage" : null;
-    const channel = change.operationType === "insert" ? "channels" : "conversation";
-
-    if (!event) return;
-
     try {
-      await pusher.trigger(channel, event, { change });
+      if (change.operationType === "insert") {
+        await pusher.trigger("channels", "newChannel", {});
+        return;
+      }
+
+      if (change.operationType !== "update" || !change.documentKey?._id) return;
+
+      const conversation = await mongoData
+        .findById(change.documentKey._id)
+        .select("type");
+      if (!conversation) return;
+
+      const roomId = conversation._id.toString();
+      const pusherChannel =
+        conversation.type === "dm" ? `private-dm-${roomId}` : `chat-${roomId}`;
+
+      // Clients refetch through an authorized API; never broadcast message contents.
+      await pusher.trigger(pusherChannel, "newMessage", { roomId });
     } catch (error) {
       console.error("Pusher notification failed:", error.message);
     }
@@ -111,7 +124,9 @@ app.post("/groups", async (req, res) => {
     const { name, creator } = req.body;
 
     if (!name || !creator?.uid) {
-      return res.status(400).json({ error: "Group name and creator are required." });
+      return res
+        .status(400)
+        .json({ error: "Group name and creator are required." });
     }
 
     let inviteCode = generateInviteCode();
@@ -145,7 +160,9 @@ app.get("/groups", async (req, res) => {
       return res.status(200).json(groups);
     }
 
-    const groups = await Group.find({ "members.uid": uid }).sort({ createdAt: -1 });
+    const groups = await Group.find({ "members.uid": uid }).sort({
+      createdAt: -1,
+    });
     return res.status(200).json(groups);
   } catch (error) {
     console.error("Group fetch failed:", error.message);
@@ -158,7 +175,9 @@ app.post("/groups/join", async (req, res) => {
     const { inviteCode, user } = req.body;
 
     if (!inviteCode || !user?.uid) {
-      return res.status(400).json({ error: "Invite code and user are required." });
+      return res
+        .status(400)
+        .json({ error: "Invite code and user are required." });
     }
 
     const group = await Group.findOne({ inviteCode });
@@ -167,7 +186,9 @@ app.post("/groups/join", async (req, res) => {
       return res.status(404).json({ error: "Invite code not found." });
     }
 
-    const alreadyMember = group.members.some((member) => member.uid === user.uid);
+    const alreadyMember = group.members.some(
+      (member) => member.uid === user.uid,
+    );
     if (!alreadyMember) {
       group.members.push(user);
       await group.save();
@@ -212,27 +233,238 @@ app.post("/groups/:id/members", async (req, res) => {
 
 app.use((req, res, next) => {
   if (mongoose.connection.readyState !== 1) {
-    return res.status(503).json({ error: "Database is temporarily unavailable. Please retry shortly." });
+    return res.status(503).json({
+      error: "Database is temporarily unavailable. Please retry shortly.",
+    });
   }
   next();
+});
+
+app.post("/pusher/auth", requireFirebaseAuth, async (req, res) => {
+  try {
+    const { socket_id: socketId, channel_name: channelName } = req.body;
+    const dmMatch = /^private-dm-([a-f\d]{24})$/i.exec(channelName || "");
+
+    if (!socketId || !dmMatch) {
+      return res
+        .status(400)
+        .json({ error: "Invalid private channel request." });
+    }
+
+    const conversation = await mongoData.findOne({
+      _id: dmMatch[1],
+      type: "dm",
+      participantIds: req.authUser.uid,
+    });
+
+    if (!conversation) {
+      return res
+        .status(403)
+        .json({ error: "You are not a participant in this DM." });
+    }
+
+    return res.json(pusher.authorizeChannel(socketId, channelName));
+  } catch (error) {
+    console.error("Private Pusher authorization failed:", error.message);
+    return res
+      .status(500)
+      .json({ error: "Could not authorize private channel." });
+  }
+});
+
+app.get("/dm", requireFirebaseAuth, async (req, res) => {
+  try {
+    const conversations = await mongoData
+      .find({ type: "dm", participantIds: req.authUser.uid })
+      .select("_id participants conversation")
+      .sort({ updatedAt: -1, _id: -1 });
+
+    return res.json(
+      conversations.map((conversation) => {
+        const otherParticipant = conversation.participants.find(
+          (participant) => participant.uid !== req.authUser.uid,
+        );
+        const latestMessage = conversation.conversation.slice(-1)[0];
+
+        return {
+          id: conversation._id,
+          otherParticipant,
+          latestMessage: latestMessage
+            ? {
+                message: latestMessage.message,
+                timestamp: latestMessage.timestamp,
+              }
+            : null,
+        };
+      }),
+    );
+  } catch (error) {
+    console.error("DM list request failed:", error.message);
+    return res.status(500).json({ error: "Could not load direct messages." });
+  }
+});
+
+app.post("/dm", requireFirebaseAuth, async (req, res) => {
+  try {
+    const recipientInput = String(req.body.recipient || "").trim();
+    if (!recipientInput) {
+      return res
+        .status(400)
+        .json({ error: "A recipient UID or email is required." });
+    }
+
+    const [creator, recipient] = await Promise.all([
+      getFirebaseUser(req.authUser.uid),
+      getFirebaseUser(recipientInput),
+    ]);
+
+    if (creator.uid === recipient.uid) {
+      return res
+        .status(400)
+        .json({ error: "You cannot start a DM with yourself." });
+    }
+
+    const participantIds = [creator.uid, recipient.uid].sort();
+    const dmKey = participantIds.join(":");
+    let conversation;
+
+    try {
+      conversation = await mongoData.findOneAndUpdate(
+        { dmKey },
+        {
+          $setOnInsert: {
+            type: "dm",
+            dmKey,
+            participantIds,
+            participants: [creator, recipient],
+            conversation: [],
+          },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+      );
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+      conversation = await mongoData.findOne({ dmKey, type: "dm" });
+    }
+
+    return res.status(200).json({
+      id: conversation._id,
+      otherParticipant: conversation.participants.find(
+        (participant) => participant.uid !== creator.uid,
+      ),
+    });
+  } catch (error) {
+    if (
+      error.code === "auth/user-not-found" ||
+      error.code === "auth/invalid-email"
+    ) {
+      return res.status(404).json({ error: "Firebase user was not found." });
+    }
+
+    console.error("DM creation failed:", error.message);
+    return res.status(500).json({ error: "Could not start direct message." });
+  }
+});
+
+app.get("/dm/:id", requireFirebaseAuth, async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: "Direct message not found." });
+    }
+
+    const conversation = await mongoData.findOne({
+      _id: req.params.id,
+      type: "dm",
+      participantIds: req.authUser.uid,
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: "Direct message not found." });
+    }
+
+    return res.json({
+      id: conversation._id,
+      otherParticipant: conversation.participants.find(
+        (participant) => participant.uid !== req.authUser.uid,
+      ),
+      conversation: conversation.conversation,
+    });
+  } catch (error) {
+    console.error("DM fetch failed:", error.message);
+    return res.status(500).json({ error: "Could not load direct message." });
+  }
+});
+
+app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: "Direct message not found." });
+    }
+
+    const text =
+      typeof req.body.message === "string" ? req.body.message.trim() : "";
+    const voiceData =
+      typeof req.body.voiceData === "string" ? req.body.voiceData : "";
+    if (!text && !voiceData) {
+      return res
+        .status(400)
+        .json({ error: "A message or voice note is required." });
+    }
+
+    const sender = {
+      uid: req.authUser.uid,
+      displayName: req.authUser.name || req.authUser.email || "User",
+      email: req.authUser.email || "",
+      photo: req.authUser.picture || "",
+    };
+    const result = await mongoData.updateOne(
+      {
+        _id: req.params.id,
+        type: "dm",
+        participantIds: req.authUser.uid,
+      },
+      {
+        $push: {
+          conversation: {
+            message: text || "🎤 Voice note",
+            timestamp: new Date().toISOString(),
+            voiceData: voiceData || undefined,
+            user: sender,
+          },
+        },
+      },
+    );
+
+    if (!result.matchedCount) {
+      return res.status(404).json({ error: "Direct message not found." });
+    }
+
+    return res.status(201).json({ ok: true });
+  } catch (error) {
+    console.error("DM message save failed:", error.message);
+    return res.status(500).json({ error: "Could not save direct message." });
+  }
 });
 
 // Create a new channel
 app.post("/new/channel", async (req, res) => {
   try {
-    const dbData = req.body;
+    const dbData = { ...req.body, type: "channel" };
     const data = await mongoData.create(dbData);
     res.status(201).send(data);
   } catch (err) {
     console.error("Channel creation failed:", err.message);
-    res.status(503).json({ error: "Could not create channel. Check the database connection and retry." });
+    res.status(503).json({
+      error:
+        "Could not create channel. Check the database connection and retry.",
+    });
   }
 });
 
 // Get the list of channels
 app.get("/get/channelList", async (req, res) => {
   try {
-    const data = await mongoData.find();
+    const data = await mongoData.find({ type: { $ne: "dm" } });
     let channels = [];
 
     data.map((channelData) => {
@@ -246,13 +478,21 @@ app.get("/get/channelList", async (req, res) => {
     res.status(200).send(channels);
   } catch (err) {
     console.error("Channel list request failed:", err.message);
-    res.status(503).json({ error: "Could not load channels. Check the database connection and retry." });
+    res.status(503).json({
+      error:
+        "Could not load channels. Check the database connection and retry.",
+    });
   }
 });
 
 // Add a new message to a conversation
 app.post("/new/message", async (req, res) => {
   try {
+    const conversation = await mongoData.findOne({ _id: req.query.id });
+    if (!conversation || conversation.type === "dm") {
+      return res.status(404).json({ error: "Public channel not found." });
+    }
+
     const data = await mongoData.updateOne(
       { _id: req.query.id },
       { $push: { conversation: req.body } },
@@ -260,29 +500,39 @@ app.post("/new/message", async (req, res) => {
     res.status(201).send(data);
   } catch (err) {
     console.error("Message save failed:", err.message);
-    res.status(503).json({ error: "Could not save message. Check the database connection and retry." });
+    res.status(503).json({
+      error: "Could not save message. Check the database connection and retry.",
+    });
   }
 });
 
 // Get all data
 app.get("/get/data", async (req, res) => {
   try {
-    const data = await mongoData.find();
+    const data = await mongoData.find({ type: { $ne: "dm" } });
     res.status(200).send(data);
   } catch (err) {
     console.error("Data request failed:", err.message);
-    res.status(503).json({ error: "Could not load data. Check the database connection and retry." });
+    res.status(503).json({
+      error: "Could not load data. Check the database connection and retry.",
+    });
   }
 });
 
 // Get a specific conversation
 app.get("/get/conversation", async (req, res) => {
   try {
-    const data = await mongoData.find({ _id: req.query.id });
+    const data = await mongoData.find({
+      _id: req.query.id,
+      type: { $ne: "dm" },
+    });
     res.status(200).send(data);
   } catch (err) {
     console.error("Conversation request failed:", err.message);
-    res.status(503).json({ error: "Could not load conversation. Check the database connection and retry." });
+    res.status(503).json({
+      error:
+        "Could not load conversation. Check the database connection and retry.",
+    });
   }
 });
 

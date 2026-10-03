@@ -1,22 +1,37 @@
-import mogoose from "mongoose";
+import mongoose from "mongoose";
 
-const discordSchema = mogoose.Schema({
+const participantSchema = new mongoose.Schema(
+  {
+    uid: { type: String, required: true },
+    displayName: String,
+    email: String,
+    photo: String,
+  },
+  { _id: false },
+);
+
+const discordSchema = new mongoose.Schema(
+  {
     channelName: String,
+    type: { type: String, enum: ["channel", "dm"], default: "channel" },
+    dmKey: { type: String, unique: true, sparse: true },
+    participants: { type: [participantSchema], default: [] },
+    participantIds: { type: [String], default: [] },
     conversation: [
-        {
-            message: String,
-            timestamp: String,
-            user: {
-                displayName: String,
-                email: String,
-                photo: String,
-                uid: String
-            }
-        }
-    ]
+      {
+        message: String,
+        timestamp: String,
+        voiceData: String,
+        user: {
+          displayName: String,
+          email: String,
+          photo: String,
+          uid: String,
+        },
+      },
+    ],
+  },
+  { timestamps: true },
+);
 
-});
-
-
-
-export default mogoose.model('conversations', discordSchema);
+export default mongoose.model("conversations", discordSchema);
