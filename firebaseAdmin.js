@@ -1,4 +1,5 @@
-import admin from "firebase-admin";
+import { initializeApp, cert } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 
 let initializedApp;
 
@@ -16,8 +17,9 @@ const getFirebaseAdmin = () => {
     "\n",
   );
 
-  initializedApp = admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+  // Securely initialize using the direct modular imports
+  initializedApp = initializeApp({
+    credential: cert(serviceAccount),
   });
 
   return initializedApp;
@@ -35,7 +37,8 @@ export const requireFirebaseAuth = async (req, res, next) => {
 
   try {
     const app = getFirebaseAdmin();
-    req.authUser = await admin.auth(app).verifyIdToken(token);
+    // Use the direct getAuth import
+    req.authUser = await getAuth(app).verifyIdToken(token);
     return next();
   } catch (error) {
     if (error.message === "FIREBASE_SERVICE_ACCOUNT_JSON is not configured.") {
@@ -54,7 +57,8 @@ export const requireFirebaseAuth = async (req, res, next) => {
 
 export const getFirebaseUser = async (uidOrEmail) => {
   const app = getFirebaseAdmin();
-  const auth = admin.auth(app);
+  const auth = getAuth(app); // Use the direct getAuth import
+
   const record = uidOrEmail.includes("@")
     ? await auth.getUserByEmail(uidOrEmail)
     : await auth.getUser(uidOrEmail);
