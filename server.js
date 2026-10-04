@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
+import { randomBytes } from "crypto";
 import mongoData from "./mongoData.js";
 import Pusher from "pusher";
 import { getFirebaseUser, requireFirebaseAuth } from "./firebaseAdmin.js";
@@ -39,8 +40,89 @@ const groupSchema = new mongoose.Schema({
 
 const Group = mongoose.models.Group || mongoose.model("Group", groupSchema);
 
+const profileSchema = new mongoose.Schema({
+  uid: { type: String, required: true, unique: true },
+  friendCode: { type: String, required: true, unique: true },
+  friends: { type: [String], default: [] },
+});
+const FriendProfile =
+  mongoose.models.FriendProfile ||
+  mongoose.model("FriendProfile", profileSchema);
+
+const friendRequestSchema = new mongoose.Schema(
+  {
+    senderUid: { type: String, required: true },
+    recipientUid: { type: String, required: true },
+    pairKey: { type: String, required: true, unique: true },
+    status: { type: String, enum: ["pending", "accepted"], default: "pending" },
+  },
+  { timestamps: true },
+);
+const FriendRequest =
+  mongoose.models.FriendRequest ||
+  mongoose.model("FriendRequest", friendRequestSchema);
+
+const channelInviteSchema = new mongoose.Schema(
+  {
+    token: { type: String, required: true, unique: true },
+    channelId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      index: true,
+    },
+    createdByUid: { type: String, required: true },
+    expiresAt: { type: Date, required: true, index: { expires: 0 } },
+  },
+  { timestamps: true },
+);
+const ChannelInvite =
+  mongoose.models.ChannelInvite ||
+  mongoose.model("ChannelInvite", channelInviteSchema);
+
 const generateInviteCode = () =>
   Math.random().toString(36).slice(2, 8).toUpperCase();
+
+const createFriendCode = () =>
+  `FRIEND-${randomBytes(4).toString("hex").toUpperCase()}`;
+
+const ensureFriendProfile = async (uid) => {
+  let profile = await FriendProfile.findOne({ uid });
+  if (profile) return profile;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await FriendProfile.create({
+        uid,
+        friendCode: createFriendCode(),
+      });
+    } catch (error) {
+      if (error.code === 11000 && error.keyPattern?.friendCode) continue;
+      if (error.code === 11000) return FriendProfile.findOne({ uid });
+      throw error;
+    }
+  }
+
+  throw new Error("Could not allocate a unique friend code.");
+};
+
+const getPublicProfile = async (uid) => {
+  const [friendProfile, firebaseUser] = await Promise.all([
+    FriendProfile.findOne({ uid }).select("uid"),
+    getFirebaseUser(uid),
+  ]);
+  if (!friendProfile) return null;
+  return {
+    uid,
+    displayName: firebaseUser.displayName,
+    photo: firebaseUser.photo,
+  };
+};
+
+const canAccessChannel = (channel, uid) =>
+  channel.type !== "dm" &&
+  (channel.accessMode === "public" ||
+    (channel.accessMode === "invite" &&
+      (channel.ownerUid === uid || channel.memberUids?.includes(uid))));
 
 //middleware config//
 app.use(
@@ -76,12 +158,16 @@ const startConversationWatch = async () => {
 
       const conversation = await mongoData
         .findById(change.documentKey._id)
-        .select("type");
+        .select("type accessMode");
       if (!conversation) return;
 
       const roomId = conversation._id.toString();
       const pusherChannel =
-        conversation.type === "dm" ? `private-dm-${roomId}` : `chat-${roomId}`;
+        conversation.type === "dm"
+          ? `private-dm-${roomId}`
+          : conversation.accessMode === "invite"
+            ? `private-room-${roomId}`
+            : `chat-${roomId}`;
 
       // Clients refetch through an authorized API; never broadcast message contents.
       await pusher.trigger(pusherChannel, "newMessage", { roomId });
@@ -119,9 +205,10 @@ mongoose.connect(mongoURI).catch((error) => {
 //api routes//
 app.get("/", (req, res) => res.status(200).send("hello World!"));
 
-app.post("/groups", async (req, res) => {
+app.post("/groups", requireFirebaseAuth, async (req, res) => {
   try {
-    const { name, creator } = req.body;
+    const { name } = req.body;
+    const creator = await getFirebaseUser(req.authUser.uid);
 
     if (!name || !creator?.uid) {
       return res
@@ -151,16 +238,9 @@ app.post("/groups", async (req, res) => {
   }
 });
 
-app.get("/groups", async (req, res) => {
+app.get("/groups", requireFirebaseAuth, async (req, res) => {
   try {
-    const { uid } = req.query;
-
-    if (!uid) {
-      const groups = await Group.find().sort({ createdAt: -1 });
-      return res.status(200).json(groups);
-    }
-
-    const groups = await Group.find({ "members.uid": uid }).sort({
+    const groups = await Group.find({ "members.uid": req.authUser.uid }).sort({
       createdAt: -1,
     });
     return res.status(200).json(groups);
@@ -170,9 +250,10 @@ app.get("/groups", async (req, res) => {
   }
 });
 
-app.post("/groups/join", async (req, res) => {
+app.post("/groups/join", requireFirebaseAuth, async (req, res) => {
   try {
-    const { inviteCode, user } = req.body;
+    const { inviteCode } = req.body;
+    const user = await getFirebaseUser(req.authUser.uid);
 
     if (!inviteCode || !user?.uid) {
       return res
@@ -201,10 +282,10 @@ app.post("/groups/join", async (req, res) => {
   }
 });
 
-app.post("/groups/:id/members", async (req, res) => {
+app.post("/groups/:id/members", requireFirebaseAuth, async (req, res) => {
   try {
-    const { member } = req.body;
-    if (!member?.uid && !member?.email) {
+    const { member: memberInput } = req.body;
+    if (!memberInput?.uid && !memberInput?.email) {
       return res.status(400).json({ error: "Member details are required." });
     }
 
@@ -212,6 +293,14 @@ app.post("/groups/:id/members", async (req, res) => {
     if (!group) {
       return res.status(404).json({ error: "Group not found." });
     }
+
+    if (group.creator?.uid !== req.authUser.uid) {
+      return res
+        .status(403)
+        .json({ error: "Only the group creator can add members." });
+    }
+
+    const member = await getFirebaseUser(memberInput.uid || memberInput.email);
 
     const alreadyMember = group.members.some((currentMember) => {
       if (member.uid && currentMember.uid === member.uid) return true;
@@ -240,27 +329,300 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get("/friends", requireFirebaseAuth, async (req, res) => {
+  try {
+    const profile = await ensureFriendProfile(req.authUser.uid);
+    const [friendProfiles, incoming] = await Promise.all([
+      FriendProfile.find({ uid: { $in: profile.friends } }).select("uid"),
+      FriendRequest.find({ recipientUid: req.authUser.uid, status: "pending" })
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    const [friends, incomingRequests] = await Promise.all([
+      Promise.all(friendProfiles.map((friend) => getPublicProfile(friend.uid))),
+      Promise.all(
+        incoming.map(async (request) => ({
+          id: request._id,
+          sender: await getPublicProfile(request.senderUid),
+          createdAt: request.createdAt,
+        })),
+      ),
+    ]);
+
+    return res.json({
+      friendCode: profile.friendCode,
+      friends: friends.filter(Boolean),
+      incomingRequests: incomingRequests.filter((request) => request.sender),
+    });
+  } catch (error) {
+    console.error("Friend list request failed:", error.message);
+    return res.status(500).json({ error: "Could not load friends." });
+  }
+});
+
+app.post("/friend-requests", requireFirebaseAuth, async (req, res) => {
+  try {
+    const friendCode = String(req.body.friendCode || "")
+      .trim()
+      .toUpperCase();
+    if (!/^FRIEND-[A-F0-9]{8}$/.test(friendCode)) {
+      return res.status(400).json({ error: "Enter a valid friend code." });
+    }
+
+    const [sender, recipient] = await Promise.all([
+      ensureFriendProfile(req.authUser.uid),
+      FriendProfile.findOne({ friendCode }),
+    ]);
+    if (!recipient)
+      return res.status(404).json({ error: "Friend code not found." });
+    if (recipient.uid === req.authUser.uid) {
+      return res.status(400).json({ error: "You cannot add yourself." });
+    }
+    if (sender.friends.includes(recipient.uid)) {
+      return res.status(409).json({ error: "You are already friends." });
+    }
+
+    const pairKey = [req.authUser.uid, recipient.uid].sort().join(":");
+    const existing = await FriendRequest.findOne({ pairKey });
+    if (existing?.status === "accepted") {
+      return res.status(409).json({ error: "You are already friends." });
+    }
+    if (existing) {
+      return res.status(409).json({
+        error:
+          existing.senderUid === req.authUser.uid
+            ? "Friend request already sent."
+            : "This person already sent you a request; accept it from Incoming requests.",
+      });
+    }
+
+    const request = await FriendRequest.create({
+      senderUid: req.authUser.uid,
+      recipientUid: recipient.uid,
+      pairKey,
+      status: "pending",
+    });
+
+    return res.status(201).json({ id: request._id, status: request.status });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: "A request already exists." });
+    }
+    console.error("Friend request creation failed:", error.message);
+    return res.status(500).json({ error: "Could not send friend request." });
+  }
+});
+
+app.post(
+  "/friend-requests/:id/accept",
+  requireFirebaseAuth,
+  async (req, res) => {
+    try {
+      if (!mongoose.isValidObjectId(req.params.id)) {
+        return res.status(404).json({ error: "Friend request not found." });
+      }
+
+      const request = await FriendRequest.findOneAndUpdate(
+        {
+          _id: req.params.id,
+          recipientUid: req.authUser.uid,
+          status: "pending",
+        },
+        { $set: { status: "accepted" } },
+        { new: true },
+      );
+      if (!request) {
+        return res
+          .status(404)
+          .json({ error: "Pending friend request not found." });
+      }
+
+      await Promise.all([
+        FriendProfile.updateOne(
+          { uid: request.senderUid },
+          { $addToSet: { friends: request.recipientUid } },
+        ),
+        FriendProfile.updateOne(
+          { uid: request.recipientUid },
+          { $addToSet: { friends: request.senderUid } },
+        ),
+      ]);
+
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error("Friend request acceptance failed:", error.message);
+      return res
+        .status(500)
+        .json({ error: "Could not accept friend request." });
+    }
+  },
+);
+
+app.post("/channels/:id/invites", requireFirebaseAuth, async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: "Channel not found." });
+    }
+
+    const channel = await mongoData.findOne({
+      _id: req.params.id,
+      type: { $ne: "dm" },
+      accessMode: "invite",
+      ownerUid: req.authUser.uid,
+    });
+    if (!channel) {
+      return res
+        .status(403)
+        .json({ error: "Only the channel owner can create invites." });
+    }
+
+    const token = randomBytes(24).toString("hex");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await ChannelInvite.create({
+      token,
+      channelId: channel._id,
+      createdByUid: req.authUser.uid,
+      expiresAt,
+    });
+
+    return res.status(201).json({
+      token,
+      channelName: channel.channelName,
+      expiresAt,
+    });
+  } catch (error) {
+    console.error("Channel invite creation failed:", error.message);
+    return res.status(500).json({ error: "Could not create channel invite." });
+  }
+});
+
+app.post("/channels/migrate-legacy", requireFirebaseAuth, async (req, res) => {
+  try {
+    const migrationOwnerUid = process.env.CHANNEL_MIGRATION_OWNER_UID;
+    if (!migrationOwnerUid || req.authUser.uid !== migrationOwnerUid) {
+      return res.status(403).json({
+        error:
+          "Legacy channel migration is restricted to the configured channel owner.",
+      });
+    }
+
+    const owner = await getFirebaseUser(req.authUser.uid);
+    const result = await mongoData.updateMany(
+      {
+        type: { $ne: "dm" },
+        accessMode: { $exists: false },
+      },
+      {
+        $set: {
+          type: "channel",
+          accessMode: "invite",
+          ownerUid: req.authUser.uid,
+          owner,
+          memberUids: [req.authUser.uid],
+        },
+      },
+    );
+
+    return res.json({ securedCount: result.modifiedCount });
+  } catch (error) {
+    console.error("Legacy channel migration failed:", error.message);
+    return res.status(500).json({ error: "Could not secure legacy channels." });
+  }
+});
+
+app.get("/channel-invites/:token", async (req, res) => {
+  try {
+    const invite = await ChannelInvite.findOne({
+      token: req.params.token,
+      expiresAt: { $gt: new Date() },
+    }).select("channelId expiresAt");
+    if (!invite)
+      return res.status(404).json({ error: "Invite is invalid or expired." });
+
+    const channel = await mongoData
+      .findOne({ _id: invite.channelId, type: { $ne: "dm" } })
+      .select("channelName accessMode");
+    if (!channel || channel.accessMode !== "invite") {
+      return res.status(404).json({ error: "Invited channel is unavailable." });
+    }
+
+    return res.json({
+      channelName: channel.channelName,
+      expiresAt: invite.expiresAt,
+    });
+  } catch (error) {
+    console.error("Channel invite lookup failed:", error.message);
+    return res
+      .status(500)
+      .json({ error: "Could not validate channel invite." });
+  }
+});
+
+app.post(
+  "/channel-invites/:token/accept",
+  requireFirebaseAuth,
+  async (req, res) => {
+    try {
+      const invite = await ChannelInvite.findOne({
+        token: req.params.token,
+        expiresAt: { $gt: new Date() },
+      });
+      if (!invite)
+        return res.status(404).json({ error: "Invite is invalid or expired." });
+
+      const channel = await mongoData.findOneAndUpdate(
+        { _id: invite.channelId, type: { $ne: "dm" }, accessMode: "invite" },
+        { $addToSet: { memberUids: req.authUser.uid } },
+        { new: true },
+      );
+      if (!channel)
+        return res
+          .status(404)
+          .json({ error: "Invited channel is unavailable." });
+
+      return res.json({ id: channel._id, name: channel.channelName });
+    } catch (error) {
+      console.error("Channel invite acceptance failed:", error.message);
+      return res.status(500).json({ error: "Could not join invited channel." });
+    }
+  },
+);
+
 app.post("/pusher/auth", requireFirebaseAuth, async (req, res) => {
   try {
     const { socket_id: socketId, channel_name: channelName } = req.body;
     const dmMatch = /^private-dm-([a-f\d]{24})$/i.exec(channelName || "");
+    const privateRoomMatch = /^private-room-([a-f\d]{24})$/i.exec(
+      channelName || "",
+    );
 
-    if (!socketId || !dmMatch) {
+    if (!socketId || (!dmMatch && !privateRoomMatch)) {
       return res
         .status(400)
         .json({ error: "Invalid private channel request." });
     }
 
-    const conversation = await mongoData.findOne({
-      _id: dmMatch[1],
-      type: "dm",
-      participantIds: req.authUser.uid,
-    });
+    const conversation = dmMatch
+      ? await mongoData.findOne({
+          _id: dmMatch[1],
+          type: "dm",
+          participantIds: req.authUser.uid,
+        })
+      : await mongoData.findOne({
+          _id: privateRoomMatch[1],
+          type: { $ne: "dm" },
+          accessMode: "invite",
+          $or: [
+            { ownerUid: req.authUser.uid },
+            { memberUids: req.authUser.uid },
+          ],
+        });
 
     if (!conversation) {
       return res
         .status(403)
-        .json({ error: "You are not a participant in this DM." });
+        .json({ error: "You do not have access to this private channel." });
     }
 
     return res.json(pusher.authorizeChannel(socketId, channelName));
@@ -322,6 +684,19 @@ app.post("/dm", requireFirebaseAuth, async (req, res) => {
       return res
         .status(400)
         .json({ error: "You cannot start a DM with yourself." });
+    }
+
+    const [creatorProfile, recipientProfile] = await Promise.all([
+      FriendProfile.findOne({ uid: creator.uid }),
+      FriendProfile.findOne({ uid: recipient.uid }),
+    ]);
+    if (
+      !creatorProfile?.friends.includes(recipient.uid) ||
+      !recipientProfile?.friends.includes(creator.uid)
+    ) {
+      return res.status(403).json({
+        error: "Add and accept each other as friends before starting a DM.",
+      });
     }
 
     const participantIds = [creator.uid, recipient.uid].sort();
@@ -447,11 +822,29 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
 });
 
 // Create a new channel
-app.post("/new/channel", async (req, res) => {
+app.post("/new/channel", requireFirebaseAuth, async (req, res) => {
   try {
-    const dbData = { ...req.body, type: "channel" };
+    const channelName = String(req.body.channelName || "").trim();
+    if (!channelName) {
+      return res.status(400).json({ error: "Channel name is required." });
+    }
+
+    const owner = await getFirebaseUser(req.authUser.uid);
+    const dbData = {
+      channelName: channelName.slice(0, 80),
+      type: "channel",
+      accessMode: "invite",
+      ownerUid: req.authUser.uid,
+      memberUids: [req.authUser.uid],
+      owner,
+    };
     const data = await mongoData.create(dbData);
-    res.status(201).send(data);
+    return res.status(201).json({
+      id: data._id,
+      name: data.channelName,
+      isPrivate: true,
+      isOwner: true,
+    });
   } catch (err) {
     console.error("Channel creation failed:", err.message);
     res.status(503).json({
@@ -462,20 +855,27 @@ app.post("/new/channel", async (req, res) => {
 });
 
 // Get the list of channels
-app.get("/get/channelList", async (req, res) => {
+app.get("/get/channelList", requireFirebaseAuth, async (req, res) => {
   try {
-    const data = await mongoData.find({ type: { $ne: "dm" } });
-    let channels = [];
+    const data = await mongoData
+      .find({
+        type: { $ne: "dm" },
+        $or: [
+          { accessMode: "public" },
+          { ownerUid: req.authUser.uid },
+          { memberUids: req.authUser.uid },
+        ],
+      })
+      .select("channelName accessMode ownerUid");
 
-    data.map((channelData) => {
-      const channelInfo = {
+    return res.status(200).json(
+      data.map((channelData) => ({
         id: channelData._id,
         name: channelData.channelName,
-      };
-      channels.push(channelInfo);
-    });
-
-    res.status(200).send(channels);
+        isPrivate: channelData.accessMode === "invite",
+        isOwner: channelData.ownerUid === req.authUser.uid,
+      })),
+    );
   } catch (err) {
     console.error("Channel list request failed:", err.message);
     res.status(503).json({
@@ -486,18 +886,54 @@ app.get("/get/channelList", async (req, res) => {
 });
 
 // Add a new message to a conversation
-app.post("/new/message", async (req, res) => {
+app.post("/new/message", requireFirebaseAuth, async (req, res) => {
   try {
     const conversation = await mongoData.findOne({ _id: req.query.id });
-    if (!conversation || conversation.type === "dm") {
+    if (!conversation || !canAccessChannel(conversation, req.authUser.uid)) {
       return res.status(404).json({ error: "Public channel not found." });
     }
 
+    const text =
+      typeof req.body.message === "string" ? req.body.message.trim() : "";
+    const voiceData =
+      typeof req.body.voiceData === "string" ? req.body.voiceData : "";
+    if (!text && !voiceData) {
+      return res
+        .status(400)
+        .json({ error: "A message or voice note is required." });
+    }
+
+    const sender = {
+      uid: req.authUser.uid,
+      displayName: req.authUser.name || req.authUser.email || "User",
+      email: req.authUser.email || "",
+      photo: req.authUser.picture || "",
+    };
+
     const data = await mongoData.updateOne(
-      { _id: req.query.id },
-      { $push: { conversation: req.body } },
+      {
+        _id: req.query.id,
+        type: { $ne: "dm" },
+        $or: [
+          { accessMode: "public" },
+          { ownerUid: req.authUser.uid },
+          { memberUids: req.authUser.uid },
+        ],
+      },
+      {
+        $push: {
+          conversation: {
+            message: text || "🎤 Voice note",
+            timestamp: new Date().toISOString(),
+            voiceData: voiceData || undefined,
+            user: sender,
+          },
+        },
+      },
     );
-    res.status(201).send(data);
+    if (!data.matchedCount)
+      return res.status(404).json({ error: "Channel not found." });
+    return res.status(201).json(data);
   } catch (err) {
     console.error("Message save failed:", err.message);
     res.status(503).json({
@@ -507,10 +943,17 @@ app.post("/new/message", async (req, res) => {
 });
 
 // Get all data
-app.get("/get/data", async (req, res) => {
+app.get("/get/data", requireFirebaseAuth, async (req, res) => {
   try {
-    const data = await mongoData.find({ type: { $ne: "dm" } });
-    res.status(200).send(data);
+    const data = await mongoData.find({
+      type: { $ne: "dm" },
+      $or: [
+        { accessMode: "public" },
+        { ownerUid: req.authUser.uid },
+        { memberUids: req.authUser.uid },
+      ],
+    });
+    return res.status(200).send(data);
   } catch (err) {
     console.error("Data request failed:", err.message);
     res.status(503).json({
@@ -520,13 +963,16 @@ app.get("/get/data", async (req, res) => {
 });
 
 // Get a specific conversation
-app.get("/get/conversation", async (req, res) => {
+app.get("/get/conversation", requireFirebaseAuth, async (req, res) => {
   try {
-    const data = await mongoData.find({
+    const channel = await mongoData.findOne({
       _id: req.query.id,
       type: { $ne: "dm" },
     });
-    res.status(200).send(data);
+    if (!channel || !canAccessChannel(channel, req.authUser.uid)) {
+      return res.status(404).json({ error: "Channel not found." });
+    }
+    return res.status(200).json([channel]);
   } catch (err) {
     console.error("Conversation request failed:", err.message);
     res.status(503).json({

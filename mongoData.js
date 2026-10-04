@@ -14,6 +14,15 @@ const discordSchema = new mongoose.Schema(
   {
     channelName: String,
     type: { type: String, enum: ["channel", "dm"], default: "channel" },
+    accessMode: { type: String, enum: ["public", "invite"], default: "public" },
+    ownerUid: String,
+    owner: {
+      uid: String,
+      displayName: String,
+      email: String,
+      photo: String,
+    },
+    memberUids: { type: [String], default: [] },
     dmKey: { type: String, unique: true, sparse: true },
     participants: { type: [participantSchema], default: [] },
     participantIds: { type: [String], default: [] },
