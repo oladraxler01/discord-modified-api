@@ -119,10 +119,12 @@ const getPublicProfile = async (uid) => {
 };
 
 const canAccessChannel = (channel, uid) =>
-  channel.type !== "dm" &&
-  (channel.accessMode === "public" ||
-    (channel.accessMode === "invite" &&
-      (channel.ownerUid === uid || channel.memberUids?.includes(uid))));
+  channel.type == null ||
+  (channel.type !== "dm" &&
+    (!channel.accessMode ||
+      channel.accessMode === "public" ||
+      (channel.accessMode === "invite" &&
+        (channel.ownerUid === uid || channel.memberUids?.includes(uid)))));
 
 //middleware config//
 app.use(
@@ -861,18 +863,22 @@ app.get("/get/channelList", requireFirebaseAuth, async (req, res) => {
       .find({
         type: { $ne: "dm" },
         $or: [
+          { type: { $exists: false } },
           { accessMode: "public" },
+          { accessMode: { $exists: false } },
           { ownerUid: req.authUser.uid },
           { memberUids: req.authUser.uid },
         ],
       })
-      .select("channelName accessMode ownerUid");
+      .select("channelName type accessMode ownerUid")
+      .lean();
 
     return res.status(200).json(
       data.map((channelData) => ({
         id: channelData._id,
         name: channelData.channelName,
-        isPrivate: channelData.accessMode === "invite",
+        isPrivate:
+          channelData.type != null && channelData.accessMode === "invite",
         isOwner: channelData.ownerUid === req.authUser.uid,
       })),
     );
@@ -915,7 +921,9 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
         _id: req.query.id,
         type: { $ne: "dm" },
         $or: [
+          { type: { $exists: false } },
           { accessMode: "public" },
+          { accessMode: { $exists: false } },
           { ownerUid: req.authUser.uid },
           { memberUids: req.authUser.uid },
         ],
@@ -948,7 +956,9 @@ app.get("/get/data", requireFirebaseAuth, async (req, res) => {
     const data = await mongoData.find({
       type: { $ne: "dm" },
       $or: [
+        { type: { $exists: false } },
         { accessMode: "public" },
+        { accessMode: { $exists: false } },
         { ownerUid: req.authUser.uid },
         { memberUids: req.authUser.uid },
       ],
