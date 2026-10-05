@@ -26,6 +26,14 @@ const discordSchema = new mongoose.Schema(
     dmKey: { type: String, unique: true, sparse: true },
     participants: { type: [participantSchema], default: [] },
     participantIds: { type: [String], default: [] },
+
+    // Mutual Agreement Tracker
+    ephemeralSettings: {
+      active: { type: Boolean, default: false },
+      durationInSeconds: { type: Number, default: 0 },
+      agreedByUids: { type: [String], default: [] },
+    },
+
     conversation: [
       {
         message: String,
@@ -37,6 +45,8 @@ const discordSchema = new mongoose.Schema(
           photo: String,
           uid: String,
         },
+        // Expiration timestamp for the sweeper
+        expireAt: Date,
       },
     ],
   },

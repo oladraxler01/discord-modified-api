@@ -994,3 +994,96 @@ app.get("/get/conversation", requireFirebaseAuth, async (req, res) => {
 
 //listen//
 app.listen(port, () => console.log(`Server is running on port ${port}`));
+
+// HANDSHAKE ROUTE: Propose or accept a timer
+app.post("/api/channels/:id/timer", async (req, res) => {
+  const { uid, durationInSeconds } = req.body;
+  const channelId = req.params.id;
+
+  try {
+    const channel = await mongoData.findById(channelId);
+    if (!channel) return res.status(404).send("Channel not found");
+
+    if (durationInSeconds === 0) {
+      // Turn off
+      channel.ephemeralSettings = {
+        active: false,
+        durationInSeconds: 0,
+        agreedByUids: [],
+      };
+    } else if (
+      channel.ephemeralSettings.durationInSeconds !== durationInSeconds
+    ) {
+      // Propose new time
+      channel.ephemeralSettings.durationInSeconds = durationInSeconds;
+      channel.ephemeralSettings.agreedByUids = [uid];
+      channel.ephemeralSettings.active = false;
+    } else {
+      // Accept existing proposal
+      if (!channel.ephemeralSettings.agreedByUids.includes(uid)) {
+        channel.ephemeralSettings.agreedByUids.push(uid);
+      }
+      if (
+        channel.ephemeralSettings.agreedByUids.length >=
+        channel.participantIds.length
+      ) {
+        channel.ephemeralSettings.active = true;
+      }
+    }
+
+    await channel.save();
+    res.status(200).send(channel.ephemeralSettings);
+  } catch (err) {
+    res.status(500).send(err);
+  }
+});
+
+// MESSAGE POST ROUTE: Attach expireAt if timer is active
+app.post("/api/messages/new", async (req, res) => {
+  const { message, timestamp, user, voiceData } = req.body;
+  const channelId = req.query.id;
+
+  try {
+    const channel = await mongoData.findById(channelId);
+    let expireAt = null;
+
+    if (channel.ephemeralSettings && channel.ephemeralSettings.active) {
+      const burnTimeMs = channel.ephemeralSettings.durationInSeconds * 1000;
+      expireAt = new Date(Date.now() + burnTimeMs);
+    }
+
+    const newMessage = {
+      message,
+      timestamp,
+      user,
+      voiceData,
+      ...(expireAt && { expireAt }),
+    };
+
+    const updatedChannel = await mongoData.findByIdAndUpdate(
+      channelId,
+      { $push: { conversation: newMessage } },
+      { new: true },
+    );
+
+    res.status(201).send(updatedChannel);
+  } catch (err) {
+    res.status(500).send(err);
+  }
+});
+
+// BACKGROUND SWEEPER: Delete expired messages every 10 seconds
+setInterval(async () => {
+  try {
+    await mongoData.updateMany(
+      {},
+      {
+        $pull: {
+          conversation: { expireAt: { $lt: new Date() } },
+        },
+      },
+    );
+  } catch (err) {
+    console.error("Message sweeper failed:", err);
+  }
+}, 10000);
