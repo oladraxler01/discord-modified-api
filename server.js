@@ -782,10 +782,15 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
       typeof req.body.message === "string" ? req.body.message.trim() : "";
     const voiceData =
       typeof req.body.voiceData === "string" ? req.body.voiceData : "";
-    if (!text && !voiceData) {
+    const attachment =
+      req.body.attachment && typeof req.body.attachment === "object"
+        ? req.body.attachment
+        : null;
+
+    if (!text && !voiceData && !attachment) {
       return res
         .status(400)
-        .json({ error: "A message or voice note is required." });
+        .json({ error: "A message, voice note, or file is required." });
     }
 
     const sender = {
@@ -794,6 +799,10 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
       email: req.authUser.email || "",
       photo: req.authUser.picture || "",
     };
+
+    const finalMessage = text ||
+      (attachment ? `📎 ${attachment.name || "Shared a file"}` : "🎤 Voice note");
+
     const result = await mongoData.updateOne(
       {
         _id: req.params.id,
@@ -803,9 +812,10 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
       {
         $push: {
           conversation: {
-            message: text || "🎤 Voice note",
+            message: finalMessage,
             timestamp: new Date().toISOString(),
             voiceData: voiceData || undefined,
+            attachment: attachment || undefined,
             user: sender,
           },
         },
@@ -903,10 +913,14 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
       typeof req.body.message === "string" ? req.body.message.trim() : "";
     const voiceData =
       typeof req.body.voiceData === "string" ? req.body.voiceData : "";
-    if (!text && !voiceData) {
+    const attachment =
+      req.body.attachment && typeof req.body.attachment === "object"
+        ? req.body.attachment
+        : null;
+    if (!text && !voiceData && !attachment) {
       return res
         .status(400)
-        .json({ error: "A message or voice note is required." });
+        .json({ error: "A message, voice note, or file is required." });
     }
 
     const sender = {
@@ -915,6 +929,9 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
       email: req.authUser.email || "",
       photo: req.authUser.picture || "",
     };
+
+    const finalMessage = text ||
+      (attachment ? `📎 ${attachment.name || "Shared a file"}` : "🎤 Voice note");
 
     const data = await mongoData.updateOne(
       {
@@ -931,9 +948,10 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
       {
         $push: {
           conversation: {
-            message: text || "🎤 Voice note",
+            message: finalMessage,
             timestamp: new Date().toISOString(),
             voiceData: voiceData || undefined,
+            attachment: attachment || undefined,
             user: sender,
           },
         },
@@ -1040,7 +1058,7 @@ app.post("/api/channels/:id/timer", async (req, res) => {
 
 // MESSAGE POST ROUTE: Attach expireAt if timer is active
 app.post("/api/messages/new", async (req, res) => {
-  const { message, timestamp, user, voiceData } = req.body;
+  const { message, timestamp, user, voiceData, attachment } = req.body;
   const channelId = req.query.id;
 
   try {
@@ -1057,6 +1075,7 @@ app.post("/api/messages/new", async (req, res) => {
       timestamp,
       user,
       voiceData,
+      attachment,
       ...(expireAt && { expireAt }),
     };
 
