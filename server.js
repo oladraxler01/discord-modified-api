@@ -5,6 +5,7 @@ import { randomBytes } from "crypto";
 import mongoData from "./mongoData.js";
 import Pusher from "pusher";
 import { getFirebaseUser, requireFirebaseAuth } from "./firebaseAdmin.js";
+import { AccessToken } from "livekit-server-sdk";
 
 //app config//
 const app = express();
@@ -800,8 +801,11 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
       photo: req.authUser.picture || "",
     };
 
-    const finalMessage = text ||
-      (attachment ? `📎 ${attachment.name || "Shared a file"}` : "🎤 Voice note");
+    const finalMessage =
+      text ||
+      (attachment
+        ? `📎 ${attachment.name || "Shared a file"}`
+        : "🎤 Voice note");
 
     const result = await mongoData.updateOne(
       {
@@ -930,8 +934,11 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
       photo: req.authUser.picture || "",
     };
 
-    const finalMessage = text ||
-      (attachment ? `📎 ${attachment.name || "Shared a file"}` : "🎤 Voice note");
+    const finalMessage =
+      text ||
+      (attachment
+        ? `📎 ${attachment.name || "Shared a file"}`
+        : "🎤 Voice note");
 
     const data = await mongoData.updateOne(
       {
@@ -1007,6 +1014,46 @@ app.get("/get/conversation", requireFirebaseAuth, async (req, res) => {
       error:
         "Could not load conversation. Check the database connection and retry.",
     });
+  }
+});
+
+// GENERATE LIVEKIT VOICE TOKEN
+app.post("/api/voice/token", async (req, res) => {
+  const { roomName, participantName } = req.body;
+
+  if (!roomName || !participantName) {
+    return res
+      .status(400)
+      .json({ error: "roomName and participantName are required" });
+  }
+
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+
+  if (!apiKey || !apiSecret) {
+    return res
+      .status(500)
+      .json({ error: "LiveKit credentials are not configured on the server." });
+  }
+
+  const at = new AccessToken(apiKey, apiSecret, {
+    identity: participantName,
+    name: participantName,
+  });
+
+  at.addGrant({
+    roomJoin: true,
+    room: roomName,
+    canPublish: true,
+    canSubscribe: true,
+  });
+
+  try {
+    const token = await at.toJwt();
+    res.status(200).json({ token });
+  } catch (error) {
+    console.error("Failed to generate token:", error);
+    res.status(500).json({ error: "Failed to generate token" });
   }
 });
 
