@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
@@ -11,13 +12,15 @@ import { AccessToken } from "livekit-server-sdk";
 const app = express();
 const port = process.env.PORT || 8002;
 
-const pusher = new Pusher({
-  appId: "2182745",
-  key: "e97d599fd9d4473f90d2",
-  secret: "0b078f40fcd10cd49953",
-  cluster: "us2",
-  useTLS: true,
-});
+const pusherSettings = {
+  appId: process.env.PUSHER_APP_ID,
+  key: process.env.PUSHER_KEY,
+  secret: process.env.PUSHER_SECRET,
+  cluster: process.env.PUSHER_CLUSTER,
+};
+const pusher = Object.values(pusherSettings).every(Boolean)
+  ? new Pusher({ ...pusherSettings, useTLS: true })
+  : null;
 
 const groupSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -80,8 +83,7 @@ const ChannelInvite =
   mongoose.models.ChannelInvite ||
   mongoose.model("ChannelInvite", channelInviteSchema);
 
-const generateInviteCode = () =>
-  Math.random().toString(36).slice(2, 8).toUpperCase();
+const generateInviteCode = () => randomBytes(12).toString("hex").toUpperCase();
 
 const createFriendCode = () =>
   `FRIEND-${randomBytes(4).toString("hex").toUpperCase()}`;
@@ -120,12 +122,36 @@ const getPublicProfile = async (uid) => {
 };
 
 const canAccessChannel = (channel, uid) =>
-  channel.type == null ||
-  (channel.type !== "dm" &&
-    (!channel.accessMode ||
-      channel.accessMode === "public" ||
+  Boolean(
+    channel &&
+    channel.type !== "dm" &&
+    (channel.accessMode === "public" ||
       (channel.accessMode === "invite" &&
-        (channel.ownerUid === uid || channel.memberUids?.includes(uid)))));
+        (channel.ownerUid === uid || channel.memberUids?.includes(uid)))),
+  );
+
+const canAccessConversation = (conversation, uid) => {
+  if (conversation?.type === "dm") {
+    return Boolean(conversation.participantIds?.includes(uid));
+  }
+  if (Array.isArray(conversation?.members)) {
+    return conversation.members.some((member) => member.uid === uid);
+  }
+  return canAccessChannel(conversation, uid);
+};
+
+const channelVisibilityFor = (uid) => ({
+  type: { $ne: "dm" },
+  $or: [
+    { accessMode: "public" },
+    { accessMode: "invite", ownerUid: uid },
+    { accessMode: "invite", memberUids: uid },
+  ],
+});
+
+const conversationVisibilityFor = (uid) => ({
+  $or: [{ type: "dm", participantIds: uid }, channelVisibilityFor(uid)],
+});
 
 //middleware config//
 app.use(
@@ -139,13 +165,12 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cors());
 
 //DB config//
-const mongoURI =
-  "mongodb+srv://olaadmin:JkVru4dy8sDwGhlL@cluster0.oq2ihlh.mongodb.net/discord?appName=Cluster0";
+const mongoURI = process.env.MONGO_URI;
 
 let changeStream;
 
 const startConversationWatch = async () => {
-  if (mongoose.connection.readyState !== 1 || changeStream) return;
+  if (mongoose.connection.readyState !== 1 || changeStream || !pusher) return;
 
   const stream = await mongoose.connection.collection("conversations").watch();
   changeStream = stream;
@@ -153,7 +178,7 @@ const startConversationWatch = async () => {
   stream.on("change", async (change) => {
     try {
       if (change.operationType === "insert") {
-        await pusher.trigger("channels", "newChannel", {});
+        if (pusher) await pusher.trigger("channels", "newChannel", {});
         return;
       }
 
@@ -173,7 +198,7 @@ const startConversationWatch = async () => {
             : `chat-${roomId}`;
 
       // Clients refetch through an authorized API; never broadcast message contents.
-      await pusher.trigger(pusherChannel, "newMessage", { roomId });
+      if (pusher) await pusher.trigger(pusherChannel, "newMessage", { roomId });
     } catch (error) {
       console.error("Pusher notification failed:", error.message);
     }
@@ -201,16 +226,24 @@ mongoose.connection.on("error", (error) => {
   console.error("MongoDB connection error:", error.message);
 });
 
-mongoose.connect(mongoURI).catch((error) => {
-  console.error("MongoDB initial connection failed:", error.message);
-});
+if (mongoURI) {
+  mongoose.connect(mongoURI).catch((error) => {
+    console.error("MongoDB initial connection failed:", error.message);
+  });
+} else {
+  console.error(
+    "MONGO_URI is not configured; database routes will remain unavailable.",
+  );
+}
 
 //api routes//
 app.get("/", (req, res) => res.status(200).send("hello World!"));
 
 app.post("/groups", requireFirebaseAuth, async (req, res) => {
   try {
-    const { name } = req.body;
+    const name = String(req.body.name || "")
+      .trim()
+      .slice(0, 80);
     const creator = await getFirebaseUser(req.authUser.uid);
 
     if (!name || !creator?.uid) {
@@ -246,10 +279,64 @@ app.get("/groups", requireFirebaseAuth, async (req, res) => {
     const groups = await Group.find({ "members.uid": req.authUser.uid }).sort({
       createdAt: -1,
     });
+    for (const group of groups) {
+      if (!/^[A-F0-9]{24}$/.test(group.inviteCode || "")) {
+        let inviteCode = generateInviteCode();
+        while (await Group.exists({ inviteCode })) {
+          inviteCode = generateInviteCode();
+        }
+        group.inviteCode = inviteCode;
+        await group.save();
+      }
+    }
     return res.status(200).json(groups);
   } catch (error) {
     console.error("Group fetch failed:", error.message);
     return res.status(500).json({ error: "Could not load groups." });
+  }
+});
+
+app.get("/groups/:id", requireFirebaseAuth, async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: "Group not found." });
+    }
+    const group = await Group.findOne({
+      _id: req.params.id,
+      "members.uid": req.authUser.uid,
+    }).select("name inviteCode creator members createdAt");
+    if (!group) {
+      return res.status(404).json({ error: "Group not found." });
+    }
+    return res.json(group);
+  } catch (error) {
+    console.error("Group detail request failed:", error.message);
+    return res.status(500).json({ error: "Could not load this group." });
+  }
+});
+
+app.get("/group-invites/:inviteCode", requireFirebaseAuth, async (req, res) => {
+  try {
+    const inviteCode = String(req.params.inviteCode || "")
+      .trim()
+      .toUpperCase();
+    const group = await Group.findOne({ inviteCode }).select(
+      "_id name creator members.uid",
+    );
+    if (!group) {
+      return res.status(404).json({ error: "This group invite is invalid." });
+    }
+    return res.json({
+      id: group._id,
+      name: group.name,
+      creatorName: group.creator?.displayName || "Group owner",
+      isMember: group.members.some((member) => member.uid === req.authUser.uid),
+    });
+  } catch (error) {
+    console.error("Group invite lookup failed:", error.message);
+    return res
+      .status(500)
+      .json({ error: "Could not validate this group invite." });
   }
 });
 
@@ -594,6 +681,11 @@ app.post(
 
 app.post("/pusher/auth", requireFirebaseAuth, async (req, res) => {
   try {
+    if (!pusher) {
+      return res
+        .status(503)
+        .json({ error: "Real-time messaging is not configured." });
+    }
     const { socket_id: socketId, channel_name: channelName } = req.body;
     const dmMatch = /^private-dm-([a-f\d]{24})$/i.exec(channelName || "");
     const privateRoomMatch = /^private-room-([a-f\d]{24})$/i.exec(
@@ -779,6 +871,15 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
       return res.status(404).json({ error: "Direct message not found." });
     }
 
+    const conversation = await mongoData.findOne({
+      _id: req.params.id,
+      type: "dm",
+      participantIds: req.authUser.uid,
+    });
+    if (!conversation) {
+      return res.status(404).json({ error: "Direct message not found." });
+    }
+
     const text =
       typeof req.body.message === "string" ? req.body.message.trim() : "";
     const voiceData =
@@ -820,6 +921,12 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
             timestamp: new Date().toISOString(),
             voiceData: voiceData || undefined,
             attachment: attachment || undefined,
+            expireAt: conversation.ephemeralSettings?.active
+              ? new Date(
+                  Date.now() +
+                    conversation.ephemeralSettings.durationInSeconds * 1000,
+                )
+              : undefined,
             user: sender,
           },
         },
@@ -874,16 +981,7 @@ app.post("/new/channel", requireFirebaseAuth, async (req, res) => {
 app.get("/get/channelList", requireFirebaseAuth, async (req, res) => {
   try {
     const data = await mongoData
-      .find({
-        type: { $ne: "dm" },
-        $or: [
-          { type: { $exists: false } },
-          { accessMode: "public" },
-          { accessMode: { $exists: false } },
-          { ownerUid: req.authUser.uid },
-          { memberUids: req.authUser.uid },
-        ],
-      })
+      .find(channelVisibilityFor(req.authUser.uid))
       .select("channelName type accessMode ownerUid")
       .lean();
 
@@ -908,10 +1006,12 @@ app.get("/get/channelList", requireFirebaseAuth, async (req, res) => {
 // Add a new message to a conversation
 app.post("/new/message", requireFirebaseAuth, async (req, res) => {
   try {
-    const conversation = await mongoData.findOne({ _id: req.query.id });
-    if (!conversation || !canAccessChannel(conversation, req.authUser.uid)) {
-      return res.status(404).json({ error: "Public channel not found." });
-    }
+    const conversation = await mongoData.findOne({
+      _id: req.query.id,
+      ...channelVisibilityFor(req.authUser.uid),
+    });
+    if (!conversation)
+      return res.status(404).json({ error: "Channel not found." });
 
     const text =
       typeof req.body.message === "string" ? req.body.message.trim() : "";
@@ -941,17 +1041,7 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
         : "🎤 Voice note");
 
     const data = await mongoData.updateOne(
-      {
-        _id: req.query.id,
-        type: { $ne: "dm" },
-        $or: [
-          { type: { $exists: false } },
-          { accessMode: "public" },
-          { accessMode: { $exists: false } },
-          { ownerUid: req.authUser.uid },
-          { memberUids: req.authUser.uid },
-        ],
-      },
+      { _id: req.query.id, ...channelVisibilityFor(req.authUser.uid) },
       {
         $push: {
           conversation: {
@@ -959,6 +1049,12 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
             timestamp: new Date().toISOString(),
             voiceData: voiceData || undefined,
             attachment: attachment || undefined,
+            expireAt: conversation.ephemeralSettings?.active
+              ? new Date(
+                  Date.now() +
+                    conversation.ephemeralSettings.durationInSeconds * 1000,
+                )
+              : undefined,
             user: sender,
           },
         },
@@ -978,16 +1074,7 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
 // Get all data
 app.get("/get/data", requireFirebaseAuth, async (req, res) => {
   try {
-    const data = await mongoData.find({
-      type: { $ne: "dm" },
-      $or: [
-        { type: { $exists: false } },
-        { accessMode: "public" },
-        { accessMode: { $exists: false } },
-        { ownerUid: req.authUser.uid },
-        { memberUids: req.authUser.uid },
-      ],
-    });
+    const data = await mongoData.find(channelVisibilityFor(req.authUser.uid));
     return res.status(200).send(data);
   } catch (err) {
     console.error("Data request failed:", err.message);
@@ -1002,9 +1089,9 @@ app.get("/get/conversation", requireFirebaseAuth, async (req, res) => {
   try {
     const channel = await mongoData.findOne({
       _id: req.query.id,
-      type: { $ne: "dm" },
+      ...channelVisibilityFor(req.authUser.uid),
     });
-    if (!channel || !canAccessChannel(channel, req.authUser.uid)) {
+    if (!channel) {
       return res.status(404).json({ error: "Channel not found." });
     }
     return res.status(200).json([channel]);
@@ -1018,13 +1105,10 @@ app.get("/get/conversation", requireFirebaseAuth, async (req, res) => {
 });
 
 // GENERATE LIVEKIT VOICE TOKEN
-app.post("/api/voice/token", async (req, res) => {
-  const { roomName, participantName } = req.body;
-
-  if (!roomName || !participantName) {
-    return res
-      .status(400)
-      .json({ error: "roomName and participantName are required" });
+app.post("/api/voice/token", requireFirebaseAuth, async (req, res) => {
+  const roomName = String(req.body.roomName || "").trim();
+  if (!roomName) {
+    return res.status(400).json({ error: "roomName is required." });
   }
 
   const apiKey = process.env.LIVEKIT_API_KEY;
@@ -1036,9 +1120,28 @@ app.post("/api/voice/token", async (req, res) => {
       .json({ error: "LiveKit credentials are not configured on the server." });
   }
 
+  let room;
+  if (mongoose.isValidObjectId(roomName)) {
+    room = await mongoData.findOne({
+      _id: roomName,
+      ...conversationVisibilityFor(req.authUser.uid),
+    });
+    if (!room)
+      room = await Group.findOne({
+        _id: roomName,
+        "members.uid": req.authUser.uid,
+      });
+  }
+  if (!room || !canAccessConversation(room, req.authUser.uid)) {
+    return res
+      .status(403)
+      .json({ error: "You do not have access to this call room." });
+  }
+
+  const profile = await getFirebaseUser(req.authUser.uid);
   const at = new AccessToken(apiKey, apiSecret, {
-    identity: participantName,
-    name: participantName,
+    identity: req.authUser.uid,
+    name: profile.displayName,
   });
 
   at.addGrant({
@@ -1061,13 +1164,44 @@ app.post("/api/voice/token", async (req, res) => {
 app.listen(port, () => console.log(`Server is running on port ${port}`));
 
 // HANDSHAKE ROUTE: Propose or accept a timer
-app.post("/api/channels/:id/timer", async (req, res) => {
-  const { uid, durationInSeconds } = req.body;
+app.post("/api/channels/:id/timer", requireFirebaseAuth, async (req, res) => {
+  const durationInSeconds = Number(req.body.durationInSeconds);
   const channelId = req.params.id;
 
   try {
-    const channel = await mongoData.findById(channelId);
+    if (!mongoose.isValidObjectId(channelId)) {
+      return res.status(404).json({ error: "Conversation not found." });
+    }
+    if (
+      !Number.isInteger(durationInSeconds) ||
+      durationInSeconds < 0 ||
+      durationInSeconds > 86400
+    ) {
+      return res.status(400).json({
+        error: "Timer must be a whole number between 0 and 86400 seconds.",
+      });
+    }
+    const channel = await mongoData.findOne({
+      _id: channelId,
+      ...conversationVisibilityFor(req.authUser.uid),
+    });
     if (!channel) return res.status(404).send("Channel not found");
+    if (!canAccessConversation(channel, req.authUser.uid)) {
+      return res
+        .status(403)
+        .json({ error: "You do not have access to this conversation." });
+    }
+
+    const participantUids =
+      channel.type === "dm"
+        ? channel.participantIds || []
+        : Array.from(
+            new Set(
+              [channel.ownerUid, ...(channel.memberUids || [])].filter(Boolean),
+            ),
+          );
+    const uid = req.authUser.uid;
+    const agreedByUids = channel.ephemeralSettings?.agreedByUids || [];
 
     if (durationInSeconds === 0) {
       // Turn off
@@ -1080,17 +1214,20 @@ app.post("/api/channels/:id/timer", async (req, res) => {
       channel.ephemeralSettings.durationInSeconds !== durationInSeconds
     ) {
       // Propose new time
-      channel.ephemeralSettings.durationInSeconds = durationInSeconds;
-      channel.ephemeralSettings.agreedByUids = [uid];
-      channel.ephemeralSettings.active = false;
+      channel.ephemeralSettings = {
+        durationInSeconds,
+        agreedByUids: [uid],
+        active: false,
+      };
     } else {
       // Accept existing proposal
       if (!channel.ephemeralSettings.agreedByUids.includes(uid)) {
-        channel.ephemeralSettings.agreedByUids.push(uid);
+        channel.ephemeralSettings.agreedByUids = [
+          ...new Set([...agreedByUids, uid]),
+        ];
       }
       if (
-        channel.ephemeralSettings.agreedByUids.length >=
-        channel.participantIds.length
+        channel.ephemeralSettings.agreedByUids.length >= participantUids.length
       ) {
         channel.ephemeralSettings.active = true;
       }
@@ -1104,37 +1241,70 @@ app.post("/api/channels/:id/timer", async (req, res) => {
 });
 
 // MESSAGE POST ROUTE: Attach expireAt if timer is active
-app.post("/api/messages/new", async (req, res) => {
-  const { message, timestamp, user, voiceData, attachment } = req.body;
-  const channelId = req.query.id;
-
+app.post("/api/messages/new", requireFirebaseAuth, async (req, res) => {
+  const channelId = String(req.query.id || "");
   try {
-    const channel = await mongoData.findById(channelId);
-    let expireAt = null;
+    if (!mongoose.isValidObjectId(channelId)) {
+      return res.status(404).json({ error: "Channel not found." });
+    }
+    const channel = await mongoData.findOne({
+      _id: channelId,
+      ...channelVisibilityFor(req.authUser.uid),
+    });
+    if (!channel) return res.status(404).json({ error: "Channel not found." });
 
-    if (channel.ephemeralSettings && channel.ephemeralSettings.active) {
-      const burnTimeMs = channel.ephemeralSettings.durationInSeconds * 1000;
-      expireAt = new Date(Date.now() + burnTimeMs);
+    const text =
+      typeof req.body.message === "string" ? req.body.message.trim() : "";
+    const voiceData =
+      typeof req.body.voiceData === "string" ? req.body.voiceData : "";
+    const attachment =
+      req.body.attachment && typeof req.body.attachment === "object"
+        ? req.body.attachment
+        : null;
+    if (!text && !voiceData && !attachment) {
+      return res
+        .status(400)
+        .json({ error: "A message, voice note, or file is required." });
     }
 
-    const newMessage = {
-      message,
-      timestamp,
-      user,
-      voiceData,
-      attachment,
-      ...(expireAt && { expireAt }),
+    const sender = {
+      uid: req.authUser.uid,
+      displayName: req.authUser.name || req.authUser.email || "User",
+      email: req.authUser.email || "",
+      photo: req.authUser.picture || "",
     };
-
-    const updatedChannel = await mongoData.findByIdAndUpdate(
-      channelId,
-      { $push: { conversation: newMessage } },
+    const finalMessage =
+      text ||
+      (attachment
+        ? `📎 ${attachment.name || "Shared a file"}`
+        : "🎤 Voice note");
+    const expireAt = channel.ephemeralSettings?.active
+      ? new Date(
+          Date.now() + channel.ephemeralSettings.durationInSeconds * 1000,
+        )
+      : undefined;
+    const updatedChannel = await mongoData.findOneAndUpdate(
+      { _id: channelId, ...channelVisibilityFor(req.authUser.uid) },
+      {
+        $push: {
+          conversation: {
+            message: finalMessage,
+            timestamp: new Date().toISOString(),
+            user: sender,
+            voiceData: voiceData || undefined,
+            attachment: attachment || undefined,
+            expireAt,
+          },
+        },
+      },
       { new: true },
     );
-
+    if (!updatedChannel)
+      return res.status(404).json({ error: "Channel not found." });
     res.status(201).send(updatedChannel);
   } catch (err) {
-    res.status(500).send(err);
+    console.error("Legacy message save failed:", err.message);
+    res.status(500).json({ error: "Could not save message." });
   }
 });
 

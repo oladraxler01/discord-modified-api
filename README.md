@@ -1,5 +1,11 @@
 # Discord backend configuration
 
+The complete VEIL setup, browser/API route list, data-flow, deployment, and access-control guide is in the [client repository README](https://github.com/oladraxler01/discord-modified-client#readme). Backend local configuration is listed in `.env.example`; `dotenv/config` loads a local `.env`, while Render should use its Environment settings.
+
+MongoDB and Pusher server credentials must be supplied through environment variables; they are no longer embedded in `server.js`. Rotate provider credentials that were previously present in tracked source, because old Git commits are not changed by removing them from the current file.
+
+Group share links are scoped to the group whose invite code they contain. `GET /groups` and `GET /groups/:id` require membership, accepting `/groups/join` adds the signed-in UID only to the matched group, and direct member additions are creator-only.
+
 ## Firebase Admin for private messaging
 
 Set `FIREBASE_SERVICE_ACCOUNT_JSON` in the backend hosting provider (Render) to the complete Firebase service-account JSON for the same Firebase project used by the frontend. Keep this value in the host's secret/environment-variable settings; do not commit the credential file or value.
