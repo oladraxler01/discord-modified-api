@@ -846,16 +846,24 @@ app.get("/dm/:id", requireFirebaseAuth, async (req, res) => {
       participantIds: req.authUser.uid,
     });
 
-    if (!conversation) {
-      return res.status(404).json({ error: "Direct message not found." });
-    }
+    const convObj =
+      conversation.toObject ? conversation.toObject() : conversation;
+    const now = Date.now();
+    const activeMessages = (convObj.conversation || []).filter(
+      (m) => !m.expireAt || new Date(m.expireAt).getTime() > now,
+    );
 
     return res.json({
-      id: conversation._id,
-      otherParticipant: conversation.participants.find(
+      id: convObj._id,
+      otherParticipant: convObj.participants?.find(
         (participant) => participant.uid !== req.authUser.uid,
       ),
-      conversation: conversation.conversation,
+      conversation: activeMessages,
+      ephemeralSettings: convObj.ephemeralSettings || {
+        active: false,
+        durationInSeconds: 0,
+        agreedByUids: [],
+      },
     });
   } catch (error) {
     console.error("DM fetch failed:", error.message);
@@ -1118,7 +1126,12 @@ app.get("/get/conversation", requireFirebaseAuth, async (req, res) => {
     if (!channel) {
       return res.status(404).json({ error: "Channel not found." });
     }
-    return res.status(200).json([channel]);
+    const channelObj = channel.toObject ? channel.toObject() : channel;
+    const now = Date.now();
+    channelObj.conversation = (channelObj.conversation || []).filter(
+      (m) => !m.expireAt || new Date(m.expireAt).getTime() > now,
+    );
+    return res.status(200).json([channelObj]);
   } catch (err) {
     console.error("Conversation request failed:", err.message);
     res.status(503).json({
@@ -1250,16 +1263,19 @@ app.post("/api/channels/:id/timer", requireFirebaseAuth, async (req, res) => {
           ...new Set([...agreedByUids, uid]),
         ];
       }
+      const targetAgreements = Math.min(2, Math.max(1, participantUids.length));
       if (
-        channel.ephemeralSettings.agreedByUids.length >= participantUids.length
+        channel.ephemeralSettings.agreedByUids.length >= targetAgreements
       ) {
         channel.ephemeralSettings.active = true;
-        // Start countdown immediately on the most recent message if it does not have one
+        // Start countdown immediately on all existing unexpired messages in conversation
         if (channel.conversation && channel.conversation.length > 0) {
-          const lastMsg = channel.conversation[channel.conversation.length - 1];
-          if (!lastMsg.expireAt) {
-            lastMsg.expireAt = new Date(Date.now() + durationInSeconds * 1000);
-          }
+          const now = Date.now();
+          channel.conversation.forEach((msg) => {
+            if (!msg.expireAt) {
+              msg.expireAt = new Date(now + durationInSeconds * 1000);
+            }
+          });
         }
       }
     }
@@ -1423,7 +1439,7 @@ app.post("/api/messages/new", requireFirebaseAuth, async (req, res) => {
   }
 });
 
-// BACKGROUND SWEEPER: Delete expired messages every 10 seconds
+// BACKGROUND SWEEPER: Delete expired messages every 5 seconds
 setInterval(async () => {
   try {
     await mongoData.updateMany(
@@ -1437,7 +1453,7 @@ setInterval(async () => {
   } catch (err) {
     console.error("Message sweeper failed:", err);
   }
-}, 10000);
+}, 5000);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
