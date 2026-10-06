@@ -10,6 +10,17 @@ const participantSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const attachmentSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: "" },
+    type: { type: String, default: "" },
+    size: { type: Number, default: 0 },
+    dataUrl: { type: String, default: "" },
+    url: { type: String, default: "" },
+  },
+  { _id: false },
+);
+
 const discordSchema = new mongoose.Schema(
   {
     channelName: String,
@@ -39,13 +50,7 @@ const discordSchema = new mongoose.Schema(
         message: String,
         timestamp: String,
         voiceData: String,
-        attachment: {
-          name: String,
-          type: String,
-          size: Number,
-          dataUrl: String,
-          url: String,
-        },
+        attachment: attachmentSchema,
         user: {
           displayName: String,
           email: String,

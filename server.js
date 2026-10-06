@@ -912,8 +912,8 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
             name: String(attachment.name || "attachment"),
             type: String(attachment.type || "application/octet-stream"),
             size: Number(attachment.size || 0),
-            dataUrl: String(attachment.dataUrl || attachment.url || ""),
-            url: String(attachment.url || attachment.dataUrl || ""),
+            dataUrl: String(attachment.dataUrl || ""),
+            url: String(attachment.url || ""),
           }
         : undefined;
 
@@ -948,8 +948,10 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
 
     return res.status(201).json({ ok: true });
   } catch (error) {
-    console.error("DM message save failed:", error.message);
-    return res.status(500).json({ error: "Could not save direct message." });
+    console.error("DM message save error details:", error);
+    return res.status(500).json({
+      error: error.message || "Could not save direct message.",
+    });
   }
 });
 
@@ -1055,8 +1057,8 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
             name: String(attachment.name || "attachment"),
             type: String(attachment.type || "application/octet-stream"),
             size: Number(attachment.size || 0),
-            dataUrl: String(attachment.dataUrl || attachment.url || ""),
-            url: String(attachment.url || attachment.dataUrl || ""),
+            dataUrl: String(attachment.dataUrl || ""),
+            url: String(attachment.url || ""),
           }
         : undefined;
 
@@ -1084,9 +1086,11 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
       return res.status(404).json({ error: "Channel not found." });
     return res.status(201).json(data);
   } catch (err) {
-    console.error("Message save failed:", err.message);
-    res.status(503).json({
-      error: "Could not save message. Check the database connection and retry.",
+    console.error("Message save error details:", err);
+    res.status(500).json({
+      error:
+        err.message ||
+        "Could not save message. Check the database connection and retry.",
     });
   }
 });
