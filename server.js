@@ -156,12 +156,12 @@ const conversationVisibilityFor = (uid) => ({
 //middleware config//
 app.use(
   express.json({
-    limit: "10mb",
+    limit: "25mb",
     strict: true,
     type: ["application/json", "application/*+json"],
   }),
 );
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "25mb" }));
 app.use(cors());
 
 //DB config//

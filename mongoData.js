@@ -39,6 +39,13 @@ const discordSchema = new mongoose.Schema(
         message: String,
         timestamp: String,
         voiceData: String,
+        attachment: {
+          name: String,
+          type: String,
+          size: Number,
+          dataUrl: String,
+          url: String,
+        },
         user: {
           displayName: String,
           email: String,
