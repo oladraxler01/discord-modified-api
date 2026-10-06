@@ -1230,15 +1230,106 @@ app.post("/api/channels/:id/timer", requireFirebaseAuth, async (req, res) => {
         channel.ephemeralSettings.agreedByUids.length >= participantUids.length
       ) {
         channel.ephemeralSettings.active = true;
+        // Start countdown immediately on the most recent message if it does not have one
+        if (channel.conversation && channel.conversation.length > 0) {
+          const lastMsg = channel.conversation[channel.conversation.length - 1];
+          if (!lastMsg.expireAt) {
+            lastMsg.expireAt = new Date(Date.now() + durationInSeconds * 1000);
+          }
+        }
       }
     }
 
     await channel.save();
+
+    // Trigger Pusher immediately so both participants see timer handshake update with zero delay and no refresh
+    const roomId = channel._id.toString();
+    const pusherChannel =
+      channel.type === "dm"
+        ? `private-dm-${roomId}`
+        : channel.accessMode === "invite"
+          ? `private-room-${roomId}`
+          : `chat-${roomId}`;
+
+    if (pusher) {
+      await pusher
+        .trigger(pusherChannel, "timerUpdate", {
+          roomId,
+          ephemeralSettings: channel.ephemeralSettings,
+        })
+        .catch((e) => console.error("Pusher timerUpdate failed:", e.message));
+      await pusher
+        .trigger(pusherChannel, "newMessage", {
+          roomId,
+        })
+        .catch((e) => console.error("Pusher newMessage failed:", e.message));
+    }
+
     res.status(200).send(channel.ephemeralSettings);
   } catch (err) {
     res.status(500).send(err);
   }
 });
+
+// START TIMER ON SPECIFIC MESSAGE: Starts countdown immediately without refresh
+app.post(
+  "/api/channels/:channelId/messages/:messageId/timer",
+  requireFirebaseAuth,
+  async (req, res) => {
+    const { channelId, messageId } = req.params;
+    const durationInSeconds = Number(req.body.durationInSeconds) || 10;
+
+    try {
+      if (!mongoose.isValidObjectId(channelId)) {
+        return res.status(404).json({ error: "Conversation not found." });
+      }
+      const channel = await mongoData.findOne({
+        _id: channelId,
+        ...conversationVisibilityFor(req.authUser.uid),
+      });
+      if (!channel) return res.status(404).json({ error: "Channel not found." });
+      if (!canAccessConversation(channel, req.authUser.uid)) {
+        return res
+          .status(403)
+          .json({ error: "You do not have access to this conversation." });
+      }
+
+      const msg = channel.conversation.id(messageId);
+      if (!msg) {
+        return res.status(404).json({ error: "Message not found." });
+      }
+
+      msg.expireAt = new Date(Date.now() + durationInSeconds * 1000);
+      await channel.save();
+
+      const roomId = channel._id.toString();
+      const pusherChannel =
+        channel.type === "dm"
+          ? `private-dm-${roomId}`
+          : channel.accessMode === "invite"
+            ? `private-room-${roomId}`
+            : `chat-${roomId}`;
+
+      if (pusher) {
+        await pusher
+          .trigger(pusherChannel, "newMessage", { roomId })
+          .catch((e) => console.error("Pusher newMessage failed:", e.message));
+        await pusher
+          .trigger(pusherChannel, "timerUpdate", {
+            roomId,
+            messageId,
+            expireAt: msg.expireAt,
+          })
+          .catch((e) => console.error("Pusher timerUpdate failed:", e.message));
+      }
+
+      return res.status(200).json({ ok: true, expireAt: msg.expireAt });
+    } catch (err) {
+      console.error("Message timer failed:", err);
+      return res.status(500).json({ error: "Failed to set message timer." });
+    }
+  },
+);
 
 // MESSAGE POST ROUTE: Attach expireAt if timer is active
 app.post("/api/messages/new", requireFirebaseAuth, async (req, res) => {
