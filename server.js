@@ -144,8 +144,12 @@ const channelVisibilityFor = (uid) => ({
   type: { $ne: "dm" },
   $or: [
     { accessMode: "public" },
+    { accessMode: { $exists: false } },
+    { accessMode: null },
     { accessMode: "invite", ownerUid: uid },
     { accessMode: "invite", memberUids: uid },
+    { ownerUid: uid },
+    { memberUids: uid },
   ],
 });
 
@@ -154,14 +158,8 @@ const conversationVisibilityFor = (uid) => ({
 });
 
 //middleware config//
-app.use(
-  express.json({
-    limit: "25mb",
-    strict: true,
-    type: ["application/json", "application/*+json"],
-  }),
-);
-app.use(express.urlencoded({ extended: false, limit: "25mb" }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(cors());
 
 //DB config//
@@ -908,6 +906,17 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
         ? `📎 ${attachment.name || "Shared a file"}`
         : "🎤 Voice note");
 
+    const cleanAttachment =
+      attachment && typeof attachment === "object"
+        ? {
+            name: String(attachment.name || "attachment"),
+            type: String(attachment.type || "application/octet-stream"),
+            size: Number(attachment.size || 0),
+            dataUrl: String(attachment.dataUrl || attachment.url || ""),
+            url: String(attachment.url || attachment.dataUrl || ""),
+          }
+        : undefined;
+
     const result = await mongoData.updateOne(
       {
         _id: req.params.id,
@@ -920,7 +929,7 @@ app.post("/dm/:id/messages", requireFirebaseAuth, async (req, res) => {
             message: finalMessage,
             timestamp: new Date().toISOString(),
             voiceData: voiceData || undefined,
-            attachment: attachment || undefined,
+            attachment: cleanAttachment,
             expireAt: conversation.ephemeralSettings?.active
               ? new Date(
                   Date.now() +
@@ -1040,6 +1049,17 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
         ? `📎 ${attachment.name || "Shared a file"}`
         : "🎤 Voice note");
 
+    const cleanAttachment =
+      attachment && typeof attachment === "object"
+        ? {
+            name: String(attachment.name || "attachment"),
+            type: String(attachment.type || "application/octet-stream"),
+            size: Number(attachment.size || 0),
+            dataUrl: String(attachment.dataUrl || attachment.url || ""),
+            url: String(attachment.url || attachment.dataUrl || ""),
+          }
+        : undefined;
+
     const data = await mongoData.updateOne(
       { _id: req.query.id, ...channelVisibilityFor(req.authUser.uid) },
       {
@@ -1048,7 +1068,7 @@ app.post("/new/message", requireFirebaseAuth, async (req, res) => {
             message: finalMessage,
             timestamp: new Date().toISOString(),
             voiceData: voiceData || undefined,
-            attachment: attachment || undefined,
+            attachment: cleanAttachment,
             expireAt: conversation.ephemeralSettings?.active
               ? new Date(
                   Date.now() +
@@ -1414,3 +1434,15 @@ setInterval(async () => {
     console.error("Message sweeper failed:", err);
   }
 }, 10000);
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error("Express uncaught error:", err);
+  if (err.type === "entity.too.large" || err.status === 413) {
+    return res.status(413).json({ error: "File payload is too large to send." });
+  }
+  return res
+    .status(err.status || 500)
+    .json({ error: err.message || "An unexpected server error occurred." });
+});
+
