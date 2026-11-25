@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="720" fill="#fff"/>
+  <text x="600" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">Figure 2 — Cloud deployment architecture (Google Cloud, Always Free tier)</text>
+  <text x="600" y="58" text-anchor="middle" font-size="14" fill="#475569">Replace &lt;EXTERNAL-IP&gt; with your VM's IP. Only TCP 5000 is public; SSH 22 is restricted to the administrator's IP.</text>
+
+  <!-- Users -->
+  <g font-size="13">
+    <rect x="30" y="110" width="210" height="85" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+    <text x="135" y="137" text-anchor="middle" font-weight="700">User A laptop</text>
+    <text x="135" y="157" text-anchor="middle">node client.js --host</text>
+    <text x="135" y="175" text-anchor="middle">&lt;EXTERNAL-IP&gt; --port 5000</text>
+    <rect x="30" y="225" width="210" height="85" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+    <text x="135" y="252" text-anchor="middle" font-weight="700">User B laptop / phone</text>
+    <text x="135" y="272" text-anchor="middle">node client.js (same cmd)</text>
+    <text x="135" y="290" text-anchor="middle">different network</text>
+    <rect x="30" y="360" width="210" height="85" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+    <text x="135" y="387" text-anchor="middle" font-weight="700">Administrator</text>
+    <text x="135" y="407" text-anchor="middle">SSH (key-based) :22</text>
+    <text x="135" y="425" text-anchor="middle">scp .pcap → Wireshark</text>
+    <rect x="30" y="490" width="210" height="70" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="135" y="518" text-anchor="middle" font-weight="700" fill="#991b1b">Anyone else</text>
+    <text x="135" y="538" text-anchor="middle" fill="#991b1b">tries :22, :8080, …</text>
+  </g>
+
+  <!-- Home NAT -->
+  <rect x="270" y="110" width="110" height="335" rx="10" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="325" y="250" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">Home /</text>
+  <text x="325" y="268" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">mobile</text>
+  <text x="325" y="286" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">router</text>
+  <text x="325" y="306" text-anchor="middle" font-size="11" fill="#475569">(NAT: private</text>
+  <text x="325" y="320" text-anchor="middle" font-size="11" fill="#475569">→ public IP)</text>
+
+  <!-- Internet -->
+  <ellipse cx="480" cy="280" rx="80" ry="140" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+  <text x="480" y="275" text-anchor="middle" font-size="16" font-weight="700" fill="#334155">Internet</text>
+  <text x="480" y="295" text-anchor="middle" font-size="12" fill="#475569">IP routing</text>
+
+  <g stroke="#334155" stroke-width="2.2" fill="none">
+    <path d="M240 152 H 268" marker-end="url(#a)"/>
+    <path d="M240 267 H 268" marker-end="url(#a)"/>
+    <path d="M240 402 H 268" marker-end="url(#a)"/>
+    <path d="M380 280 H 398" marker-end="url(#a)"/>
+      </g>
+  <text x="590" y="170" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">TCP :5000</text>
+  <text x="600" y="330" text-anchor="middle" font-size="12" font-weight="700" fill="#a16207">TCP :22</text>
+  <text x="430" y="565" text-anchor="middle" font-size="12" fill="#991b1b">dropped by firewall</text>
+
+  <!-- GCP -->
+  <rect x="630" y="90" width="545" height="590" rx="14" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+  <text x="900" y="116" text-anchor="middle" font-size="16" font-weight="700" fill="#075985">Google Cloud project · region us-central1 · VPC "default"</text>
+
+  <rect x="650" y="135" width="505" height="120" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2"/>
+  <text x="900" y="158" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">VPC firewall (network entry point, stateful)</text>
+  <g font-size="12" fill="#0f172a">
+    <text x="670" y="182">✔ veil-chat-tcp-5000 : INGRESS allow tcp:5000 from 0.0.0.0/0 → tag veil-chat</text>
+    <text x="670" y="202">✔ veil-ssh-admin     : INGRESS allow tcp:22 from &lt;ADMIN-IP&gt;/32 → tag veil-chat</text>
+    <text x="670" y="222">✖ default-allow-ssh deleted · implied deny-all for every other ingress</text>
+    <text x="670" y="242">(temporary, testing only: udp:6001 + tcp:6002 for UDP/TCP comparison)</text>
+  </g>
+
+  <rect x="650" y="275" width="505" height="50" rx="10" fill="#fff" stroke="#0284c7"/>
+  <text x="900" y="297" text-anchor="middle" font-size="13" font-weight="700">Ephemeral external IP &lt;EXTERNAL-IP&gt;  ⇄  internal IP 10.128.0.x</text>
+  <text x="900" y="315" text-anchor="middle" font-size="12" fill="#475569">1:1 NAT by Google's network — server log shows the internal IP as local address</text>
+
+  <rect x="650" y="345" width="505" height="250" rx="10" fill="#ecfdf5" stroke="#16a34a" stroke-width="2"/>
+  <text x="900" y="370" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">VM "veil-tcp" · e2-micro · Ubuntu 24.04 · 10 GB std disk</text>
+  <rect x="670" y="385" width="230" height="110" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="785" y="408" text-anchor="middle" font-size="13" font-weight="700">systemd: veil-tcp-chat</text>
+  <text x="785" y="428" text-anchor="middle" font-size="12">user "veil" (unprivileged)</text>
+  <text x="785" y="446" text-anchor="middle" font-size="12">node tcp-chat/server.js</text>
+  <text x="785" y="464" text-anchor="middle" font-size="12">listen 0.0.0.0:5000</text>
+  <text x="785" y="482" text-anchor="middle" font-size="12">Restart=on-failure</text>
+  <rect x="915" y="385" width="220" height="110" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="1025" y="408" text-anchor="middle" font-size="13" font-weight="700">Ops &amp; evidence</text>
+  <text x="1025" y="428" text-anchor="middle" font-size="12">journald + logs/server.log</text>
+  <text x="1025" y="446" text-anchor="middle" font-size="12">tcpdump → .pcap</text>
+  <text x="1025" y="464" text-anchor="middle" font-size="12">tc netem (loopback tests)</text>
+  <text x="1025" y="482" text-anchor="middle" font-size="12">ss -tin (cwnd, rtt, windows)</text>
+  <rect x="670" y="510" width="465" height="70" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="900" y="533" text-anchor="middle" font-size="12">Config via env vars (TCP_PORT, TCP_HOST) in unit file; no secrets.</text>
+  <text x="900" y="551" text-anchor="middle" font-size="12">VEIL web-API secrets stay in Render env vars, never in Git.</text>
+  <text x="900" y="569" text-anchor="middle" font-size="12">sshd: key-based login (GCP OS Login / metadata keys)</text>
+
+  <path d="M900 255 V 273" stroke="#334155" stroke-width="2.2" marker-end="url(#a)"/>
+  <path d="M900 325 V 343" stroke="#334155" stroke-width="2.2" marker-end="url(#a)"/>
+
+  <rect x="650" y="610" width="505" height="55" rx="10" fill="#fff" stroke="#7c3aed"/>
+  <text x="900" y="633" text-anchor="middle" font-size="13" font-weight="700" fill="#5b21b6">Billing: budget $1 with alerts at 50 / 90 / 100 %</text>
+  <text x="900" y="652" text-anchor="middle" font-size="12" fill="#5b21b6">Always Free e2-micro + 30 GB std disk + 1 GB egress → estimated $0.00 / month</text>
+
+  <!-- TCP path legend -->
+  <g font-size="12" fill="#334155">
+    <text x="30" y="620" font-weight="700">TCP connection path</text>
+    <text x="30" y="640">client socket (192.168.x.y:51234) → router NAT (public IP:port)</text>
+    <text x="30" y="658">→ Internet → firewall (tcp:5000 allowed) → external IP</text>
+    <text x="30" y="676">→ 10.128.0.x:5000 → node server.js listening socket</text>
+  </g>
+  <path d="M556 220 C 590 200, 610 185, 648 180" marker-end="url(#a)" marker-start="url(#a)" stroke="#334155" stroke-width="2.2" fill="none"/>
+  <path d="M552 340 C 600 300, 615 230, 648 205" marker-end="url(#a)" stroke="#ca8a04" stroke-width="2.2" fill="none"/>
+  <path d="M240 525 C 450 560, 600 420, 648 235" stroke="#dc2626" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#r)"/>
+</svg>

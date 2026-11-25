@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="760" fill="#ffffff"/>
+  <text x="600" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">Figure 1 — Application architecture: VEIL TCP Chat</text>
+  <text x="600" y="58" text-anchor="middle" font-size="14" fill="#475569">Every client holds one long-lived TCP connection (client IP:ephemeral port ↔ server IP:5000); frames are newline-delimited JSON</text>
+
+  <!-- Clients -->
+  <rect x="30" y="90" width="250" height="400" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="155" y="116" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">Client processes</text>
+  <g font-size="13" fill="#0f172a">
+    <rect x="50" y="135" width="210" height="70" rx="8" fill="#fff" stroke="#3b82f6"/>
+    <text x="155" y="160" text-anchor="middle" font-weight="600">client.js  (user "ola")</text>
+    <text x="155" y="180" text-anchor="middle">readline UI → encode()</text>
+    <text x="155" y="196" text-anchor="middle">FrameDecoder ← socket</text>
+    <rect x="50" y="220" width="210" height="70" rx="8" fill="#fff" stroke="#3b82f6"/>
+    <text x="155" y="245" text-anchor="middle" font-weight="600">client.js  (user "bob")</text>
+    <text x="155" y="265" text-anchor="middle">/dm  /users  /ping</text>
+    <text x="155" y="281" text-anchor="middle">/quit (FIN)  /crash (RST)</text>
+    <rect x="50" y="305" width="210" height="60" rx="8" fill="#fff" stroke="#3b82f6"/>
+    <text x="155" y="330" text-anchor="middle" font-weight="600">client.js  (user "carol")</text>
+    <text x="155" y="350" text-anchor="middle">≥3 concurrent clients</text>
+    <rect x="50" y="380" width="210" height="45" rx="8" fill="#fff" stroke="#3b82f6" stroke-dasharray="5 4"/>
+    <text x="155" y="408" text-anchor="middle">netcat / bench.js (testing)</text>
+    <text x="155" y="460" text-anchor="middle" font-size="12" fill="#475569">Each socket bound to an OS-chosen</text>
+    <text x="155" y="476" text-anchor="middle" font-size="12" fill="#475569">ephemeral port, e.g. 51234</text>
+  </g>
+
+  <!-- TCP pipe -->
+  <g stroke="#334155" stroke-width="2.2" fill="none">
+    <path d="M260 170 H 400" marker-end="url(#a)" marker-start="url(#a)"/>
+    <path d="M260 255 H 400" marker-end="url(#a)" marker-start="url(#a)"/>
+    <path d="M260 335 H 400" marker-end="url(#a)" marker-start="url(#a)"/>
+    <path d="M260 402 H 400" marker-end="url(#a)" marker-start="url(#a)" stroke-dasharray="6 4"/>
+  </g>
+  <rect x="285" y="440" width="110" height="52" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="340" y="461" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">TCP / IP</text>
+  <text x="340" y="479" text-anchor="middle" font-size="11" fill="#334155">port 5000</text>
+  <text x="330" y="150" text-anchor="middle" font-size="11" fill="#334155">TCP stream</text>
+
+  <!-- Server -->
+  <rect x="400" y="90" width="560" height="560" rx="12" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="680" y="116" text-anchor="middle" font-size="16" font-weight="700" fill="#14532d">server.js — Node.js net.Server (single process, event loop)</text>
+
+  <rect x="420" y="135" width="250" height="78" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="545" y="158" text-anchor="middle" font-size="13" font-weight="700">Listening socket 0.0.0.0:5000</text>
+  <text x="545" y="177" text-anchor="middle" font-size="12">kernel completes SYN / SYN-ACK / ACK</text>
+  <text x="545" y="195" text-anchor="middle" font-size="12">→ 'connection' event per client</text>
+
+  <rect x="690" y="135" width="250" height="78" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="815" y="158" text-anchor="middle" font-size="13" font-weight="700">Per-connection socket</text>
+  <text x="815" y="177" text-anchor="middle" font-size="12">setNoDelay · keep-alive 30 s</text>
+  <text x="815" y="195" text-anchor="middle" font-size="12">idle timeout 5 min</text>
+
+  <rect x="420" y="235" width="250" height="90" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="545" y="258" text-anchor="middle" font-size="13" font-weight="700">FrameDecoder (protocol.js)</text>
+  <text x="545" y="277" text-anchor="middle" font-size="12">buffer bytes → split on "\n"</text>
+  <text x="545" y="294" text-anchor="middle" font-size="12">handles split / combined reads,</text>
+  <text x="545" y="311" text-anchor="middle" font-size="12">UTF-8 safe, 16 KiB frame limit</text>
+
+  <rect x="690" y="235" width="250" height="90" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="815" y="258" text-anchor="middle" font-size="13" font-weight="700">Validation</text>
+  <text x="815" y="277" text-anchor="middle" font-size="12">JSON object? known type?</text>
+  <text x="815" y="294" text-anchor="middle" font-size="12">username 2–20 [A-Za-z0-9_-], unique</text>
+  <text x="815" y="311" text-anchor="middle" font-size="12">text 1–1000 chars · error reply</text>
+
+  <rect x="420" y="345" width="520" height="80" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="680" y="368" text-anchor="middle" font-size="13" font-weight="700">Message router — handleMessage()</text>
+  <text x="680" y="388" text-anchor="middle" font-size="12">hello → welcome + joined   ·   msg → broadcast (seq #)   ·   dm → one user</text>
+  <text x="680" y="406" text-anchor="middle" font-size="12">list → users   ·   ping → pong (RTT)   ·   bye → reply + FIN</text>
+
+  <rect x="420" y="445" width="250" height="80" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="545" y="468" text-anchor="middle" font-size="13" font-weight="700">State (in memory)</text>
+  <text x="545" y="487" text-anchor="middle" font-size="12">clients: Map&lt;id, {socket, username}&gt;</text>
+  <text x="545" y="504" text-anchor="middle" font-size="12">history: last 20 messages</text>
+
+  <rect x="690" y="445" width="250" height="80" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="815" y="468" text-anchor="middle" font-size="13" font-weight="700">Lifecycle handlers</text>
+  <text x="815" y="487" text-anchor="middle" font-size="12">'end' = FIN · 'error' ECONNRESET = RST</text>
+  <text x="815" y="504" text-anchor="middle" font-size="12">'timeout' · 'close' → cleanup + "left"</text>
+
+  <rect x="410" y="545" width="540" height="85" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="680" y="568" text-anchor="middle" font-size="13" font-weight="700">Logging &amp; shutdown</text>
+  <text x="680" y="588" text-anchor="middle" font-size="12">timestamped log → stdout (journald) + tcp-chat/logs/server.log</text>
+  <text x="680" y="606" text-anchor="middle" font-size="11">events: connection_open · user_joined · client_error · peer_fin_received · socket_error · connection_closed</text>
+  <text x="680" y="622" text-anchor="middle" font-size="12">SIGTERM/SIGINT → notify clients, end sockets (FIN), close listener</text>
+
+  <g stroke="#16a34a" stroke-width="1.8" fill="none">
+    <path d="M670 174 H 688" marker-end="url(#a)"/>
+    <path d="M815 213 V 222 H 545 V 233" marker-end="url(#a)"/>
+    <path d="M670 280 H 688" marker-end="url(#a)"/>
+    <path d="M815 325 V 343" marker-end="url(#a)"/>
+    <path d="M545 425 V 443" marker-end="url(#a)"/>
+    <path d="M815 425 V 443" marker-end="url(#a)"/>
+  </g>
+
+  <!-- Comparison tools -->
+  <rect x="985" y="90" width="190" height="250" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+  <text x="1080" y="116" text-anchor="middle" font-size="15" font-weight="700" fill="#7c2d12">Comparison tools</text>
+  <text x="1080" y="136" text-anchor="middle" font-size="12" fill="#7c2d12">(separate from chat)</text>
+  <rect x="1000" y="150" width="160" height="70" rx="8" fill="#fff" stroke="#ea580c"/>
+  <text x="1080" y="173" text-anchor="middle" font-size="12" font-weight="700">compare/sender.js</text>
+  <text x="1080" y="191" text-anchor="middle" font-size="12">100 numbered msgs</text>
+  <text x="1080" y="208" text-anchor="middle" font-size="12">UDP or TCP</text>
+  <rect x="1000" y="250" width="160" height="70" rx="8" fill="#fff" stroke="#ea580c"/>
+  <text x="1080" y="273" text-anchor="middle" font-size="12" font-weight="700">compare/receiver.js</text>
+  <text x="1080" y="291" text-anchor="middle" font-size="12">UDP :6001 · TCP :6002</text>
+  <text x="1080" y="308" text-anchor="middle" font-size="12">counts, gaps, order</text>
+  <path d="M1080 220 V 248" stroke="#ea580c" stroke-width="2" marker-end="url(#a)" marker-start="url(#a)"/>
+
+  <!-- Existing VEIL -->
+  <rect x="985" y="360" width="190" height="290" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="1080" y="386" text-anchor="middle" font-size="15" font-weight="700" fill="#475569">Existing VEIL web app</text>
+  <text x="1080" y="406" text-anchor="middle" font-size="12" fill="#64748b">(context, not the TCP core)</text>
+  <g font-size="12" fill="#475569" text-anchor="middle">
+    <text x="1080" y="436">React client (Vercel)</text>
+    <text x="1080" y="456">↓ HTTPS REST over TCP 443</text>
+    <text x="1080" y="476">Express API (Render)</text>
+    <text x="1080" y="496">↓ Mongoose</text>
+    <text x="1080" y="516">MongoDB Atlas</text>
+    <text x="1080" y="546">Pusher (WSS over TCP)</text>
+    <text x="1080" y="566">notify-only events</text>
+    <text x="1080" y="596">LiveKit voice</text>
+    <text x="1080" y="616">(WebRTC, UDP media)</text>
+  </g>
+
+  <!-- Legend -->
+  <g font-size="12" fill="#334155">
+    <line x1="40" y1="690" x2="90" y2="690" stroke="#334155" stroke-width="2.2" marker-end="url(#a)" marker-start="url(#a)"/>
+    <text x="100" y="694">TCP connection (full-duplex byte stream)</text>
+    <line x1="400" y1="690" x2="450" y2="690" stroke="#16a34a" stroke-width="1.8" marker-end="url(#a)"/>
+    <text x="460" y="694">internal processing step</text>
+    <rect x="650" y="680" width="40" height="20" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="6 4"/>
+    <text x="700" y="694">existing system, unchanged</text>
+    <text x="40" y="730">Frame example: {"type":"msg","text":"hi"}\n  →  server replies {"type":"msg","seq":1,"from":"ola","text":"hi","ts":…}\n to every connected user</text>
+  </g>
+</svg>

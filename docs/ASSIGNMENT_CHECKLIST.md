@@ -95,5 +95,5 @@ VEIL web UI can join the same TCP chat (WebSockets are allowed if you explain th
 2. **Wed/Thu** — UDP/TCP comparison tools, bench tool, experiment scripts. ✅ done (`compare/`, `bench.js`, `experiments/`)
 3. **Thu** — Deploy on GCP/AWS free tier, firewall, systemd. Take 2-user screenshots. 🟡 guide ready (`tcp-chat/deploy/DEPLOY.md`), you run it
 4. **Thu/Fri** — Run 4 Wireshark experiments + comparison, collect .pcap/screenshots.
-5. **Fri** — Report, diagrams, test log. Optional: VEIL web UI bridge.
+5. **Fri** — Report, diagrams, test log. ✅ drafted (`docs/REPORT.md` / `REPORT.docx`, `docs/diagrams/`, `docs/TEST_LOG.md`), you fill the `[FILL]` gaps. Optional: VEIL web UI bridge.
 6. **Sat** — Rehearse demo: change port live, explain framing, FIN vs RST.

@@ -28,7 +28,8 @@ gives us a public IP, full control of the TCP port and firewall, and root access
   1 GB of outbound traffic, or a *reserved static IP that isn't attached to a running VM*. We use an
   ephemeral IP, so none of these apply.
 - Set a budget alert at Billing → Budgets & alerts → Create budget → $1, with alerts at 50%, 90% and 100%.
-- **Estimated cost: $0.00 per month** within the free tier. If you go over, it's roughly $7/month for e2-micro
+- **External IPv4 address:** Google has charged for in-use external IPv4 addresses on some VMs since 2024. Check the "External IP address pricing" page, and look at Billing → Reports a day after you deploy. If it's charged, expect roughly $3–4/month, or a few cents for the few days you need it.
+- **Estimated cost: $0.00 per month** within the free tier (apart from any IPv4 charge above). If you go over, it's roughly $7/month for e2-micro
   outside a free region. Chat traffic is a few KB per message, far below 1 GB.
 
 ## 1. Provision (Cloud Console, or Cloud Shell commands)
