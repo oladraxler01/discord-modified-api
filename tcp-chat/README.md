@@ -11,6 +11,10 @@ as a separate process on its own port.
 | `protocol.js` | NDJSON framing (`FrameDecoder`) and validation |
 | `PROTOCOL.md` | Message format specification |
 | `tests/` | Framing unit tests and server integration tests |
+| `bench.js` | Experiment 4: RTT and throughput against the chat server |
+| `compare/` | Separate UDP/TCP sender and receiver, `run-all.sh`, `summarize.js` (TCP vs UDP comparison) |
+| `experiments/` | `EXPERIMENTS.md` step-by-step guide, plus `capture.sh` (tcpdump) and `netem.sh` (packet loss/delay) |
+| `deploy/` | `DEPLOY.md` (GCP/AWS guide, firewall, cost, cleanup) and the systemd service file |
 | `logs/server.log` | Connection and error log (created at runtime, not committed) |
 
 ## Requirements

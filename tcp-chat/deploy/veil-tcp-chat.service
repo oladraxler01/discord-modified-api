@@ -1,0 +1,25 @@
+# systemd unit: keeps the TCP chat server running, restarts it on crash, starts on boot.
+# Install:  sudo cp tcp-chat/deploy/veil-tcp-chat.service /etc/systemd/system/
+#           (edit User= and WorkingDirectory= if your username is not "veil")
+#           sudo systemctl daemon-reload && sudo systemctl enable --now veil-tcp-chat
+[Unit]
+Description=VEIL TCP chat server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=veil
+WorkingDirectory=/home/veil/discord-modified-api
+Environment=TCP_HOST=0.0.0.0
+Environment=TCP_PORT=5000
+ExecStart=/usr/bin/node tcp-chat/server.js
+Restart=on-failure
+RestartSec=2
+# SIGTERM triggers the server's graceful shutdown (notifies clients, sends FIN)
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
