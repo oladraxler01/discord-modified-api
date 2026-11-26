@@ -379,24 +379,51 @@ test usernames and test text only.
 
 ## 7.1 Experiment 1 — Connection establishment
 
-**Setup:** server on the GCP VM, client on my laptop over the Internet. `tcpdump` on the VM
-(`exp1-handshake.pcap`).
+**Setup:** server and client both on my Windows laptop, using the loopback interface
+(127.0.0.1). The capture was taken in Wireshark 4.6.10 on "Adapter for loopback traffic capture"
+(Npcap), with display filter `tcp.port == 5000` and relative sequence numbers turned off, so the
+real ISNs are shown. File: `exp1-handshake.pcapng`.
+`[FILL: if you get a cloud VM, repeat this over the Internet and add a second table]`
 
-`[FILL: Screenshot — Wireshark packet list showing SYN, SYN-ACK, ACK, annotated]`
+`[FILL: Screenshot — Wireshark packet list, packets 53–55 highlighted]`
+`[FILL: Screenshot — packet 53 details, Transmission Control Protocol expanded]`
 
-| Packet | Src IP:port | Dst IP:port | Flags | Seq (raw) | Ack (raw) | Notes |
+| Pkt | Source → Destination | Flags | Seq (raw) | Ack (raw) | Win | Notes |
 |---|---|---|---|---|---|---|
-| 1 | `[FILL]` | 10.128.0.2:5000 | SYN | x = `[FILL]` | 0 | Options: MSS `[FILL]`, WS `[FILL]`, SACK_PERM |
-| 2 | 10.128.0.2:5000 | `[FILL]` | SYN, ACK | y = `[FILL]` | x+1 | Server options |
-| 3 | `[FILL]` | 10.128.0.2:5000 | ACK | x+1 | y+1 | Connection ESTABLISHED |
+| 53 | 127.0.0.1:**16414** → 127.0.0.1:**5000** | SYN | **282152160** (client ISN *x*) | 0 | 65535 | Options: MSS=65495, WS=256 (×256), SACK_PERM |
+| 54 | 127.0.0.1:5000 → 127.0.0.1:16414 | SYN, ACK | **1135857521** (server ISN *y*) | 282152161 (*x*+1) | 65535 | Server's own MSS, WS and SACK |
+| 55 | 127.0.0.1:16414 → 127.0.0.1:5000 | ACK | 282152161 (*x*+1) | 1135857522 (*y*+1) | 327424 | Handshake done: ESTABLISHED |
 
-**Explanation:** the client chose a random ISN *x* and the server answered with its own ISN *y*,
-acknowledging *x*+1 (the SYN uses one sequence number). The final ACK confirms *y*+1, after
-which the server's `connection_open` log line appears with the same peer address
-(`[FILL: log line]`). The client address seen by the VM is `[FILL]`, my home router's public IP,
-not my laptop's private IP `[FILL: e.g. 192.168.x.x]`, because of NAT. The server address is
-the VM's internal IP behind Google's external IP `[FILL: EXTERNAL-IP]`. The handshake RTT
-(SYN → SYN-ACK at the client) was `[FILL]` ms.
+**Explanation:** the client process was given ephemeral port **16414** by Windows and connected
+to the server's well-known port **5000**. Together the two IP:port pairs form the connection's
+4-tuple. The client chose a random initial sequence number x = 282152160. The server replied
+with its own random ISN y = 1135857521 and acknowledged x+1: a SYN uses up one sequence number
+even though it carries no data (Len=0). The third packet acknowledges y+1, and both sides then
+consider the connection established. The whole handshake took about 0.25 ms on loopback
+(40.661066 s → 40.661317 s).
+
+The SYN also negotiated options:
+- **MSS = 65495:** the largest segment the receiver accepts. This is the loopback MTU of 65535 minus 40 bytes of IP and TCP headers.
+- **Window scale = 256:** the 16-bit window field is multiplied by 256. That's why packet 55's `Win=327424` (= 1279 × 256) is larger than 65535.
+- **SACK permitted:** selective acknowledgements are allowed.
+
+**The rest of the same capture shows framing and the connection lifecycle:**
+
+| Pkt | Direction | Len (bytes) | Content (Follow TCP Stream) |
+|---|---|---|---|
+| 56 | client → server | 34 | `{"type":"hello","username":"ola"}` + `\n` (33 + 1) |
+| 58 | server → client | 163 | `welcome` frame |
+| 92 | client → server | 39 | `{"type":"msg","text":"hello from ola"}` + `\n` |
+| 94 | server → client | 79 | broadcast `msg` with `seq: 1` |
+| 122–123 | server ↔ client | 1 / 0 | **TCP Keep-Alive** probe and ACK, 30 s after the last data. This is my `socket.setKeepAlive(true, 30000)` working |
+| 132 / 134 | both | 15 / 15 | `{"type":"bye"}` + `\n` and the server's reply |
+| 136–139 | both | 0 | FIN,ACK → ACK → FIN,ACK → ACK: the graceful four-way close (see §7.3) |
+
+Each `Len` matches the byte length of one JSON object plus its `\n` delimiter, and every data
+segment is acknowledged by the receiver. Packet 57 (server) has Ack = 282152161 + 34 = 282152195,
+and packet 59 (client) has Ack = 1135857522 + 163 = 1135857685. That is TCP's cumulative acknowledgement counting bytes,
+not messages. In this capture each frame happened to fit in its own segment. Experiment 2/4
+shows cases where they don't.
 
 ## 7.2 Experiment 2 — Packet loss and retransmission
 
