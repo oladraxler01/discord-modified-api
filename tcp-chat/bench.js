@@ -24,6 +24,9 @@ const label = arg("label", "run");
 const pings = Number(arg("pings", 50));
 const messages = Number(arg("messages", 500));
 const size = Math.min(Number(arg("size", 512)), 1000); // server limit is 1000 chars
+// Seconds to pause after connecting, before measuring. Lets you switch on packet loss
+// (clumsy / netem) AFTER the handshake, so the test measures data retransmission.
+const pauseSec = Number(arg("pause", 0));
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = arg("out", path.join(here, "compare", "results"));
 
@@ -72,6 +75,11 @@ socket.on("connect", async () => {
   send({ type: "hello", username: name });
   await next((m) => m.type === "welcome");
   console.log(`Connected ${socket.localAddress}:${socket.localPort} -> ${host}:${port} as ${name}`);
+  for (let left = pauseSec; left > 0; left -= 1) {
+    process.stdout.write(`Starting in ${left}s — switch on packet loss now...   \r`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (pauseSec) console.log("Measuring...                                        ");
 
   const rtts = [];
   for (let i = 0; i < pings; i += 1) {

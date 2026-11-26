@@ -26,6 +26,13 @@ const count = Number(arg("count", 100));
 const interval = Number(arg("interval", 20));
 const label = arg("label", "run");
 const waitMs = Number(arg("wait", 3000)); // how long to wait for late echoes
+const pauseSec = Number(arg("pause", 0)); // pause before sending (switch on loss after TCP handshake)
+const countdown = async () => {
+  for (let left = pauseSec; left > 0; left -= 1) {
+    process.stdout.write(`Starting in ${left}s — switch on packet loss now...   \r`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+};
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = arg("out", path.join(here, "results"));
 
@@ -84,6 +91,7 @@ if (proto === "udp") {
     } catch { /* ignore */ }
   });
   socket.bind(0, async () => {
+    await countdown();
     console.log(`UDP sending ${count} datagrams to ${host}:${port} from local port ${socket.address().port}`);
     const start = Date.now();
     for (let seq = 1; seq <= count; seq += 1) {
@@ -110,6 +118,7 @@ if (proto === "udp") {
   });
   socket.on("connect", async () => {
     console.log(`TCP connected ${socket.localAddress}:${socket.localPort} -> ${host}:${port}, sending ${count} messages`);
+    await countdown();
     const start = Date.now();
     for (let seq = 1; seq <= count; seq += 1) {
       socket.write(encode(data(seq)));
