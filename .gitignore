@@ -5,5 +5,3 @@ node_modules/
 npm-debug.log*
 
 tcp-chat/logs/
-*.pcap
-*.pcapng
