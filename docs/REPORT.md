@@ -427,24 +427,62 @@ shows cases where they don't.
 
 ## 7.2 Experiment 2 — Packet loss and retransmission
 
-**Setup:** server and `bench.js` both on the VM over loopback, with `tc netem loss
-[FILL: 10]%`. Loss was applied only to the loopback interface of my own VM.
+**Setup:** server and `bench.js` on my Windows laptop over loopback. Windows has no `tc netem`,
+so I used **clumsy 0.3** (which uses the WinDivert driver) to drop **10%** of packets on port 5000 in both
+directions. Filter: `outbound and ip.DstAddr >= 127.0.0.1 and ip.DstAddr <= 127.255.255.255 and
+(tcp.DstPort == 5000 or tcp.SrcPort == 5000)`. Wireshark captured on the Npcap loopback adapter
+(`exp2-loss.pcapng`). Loss was only applied to my own machine's loopback traffic.
 
-`[FILL: Screenshot — filter tcp.analysis.retransmission || tcp.analysis.duplicate_ack]`
-`[FILL: Optional screenshot — Stevens graph showing a stall]`
+**Observation about the handshake:** when loss was switched on *before* connecting, Windows
+failed with `ETIMEDOUT` twice. A lost SYN or SYN-ACK on loopback was not recovered in time. I
+added a `--pause` option to `bench.js`, so the connection is established first and loss is
+switched on during a countdown. The experiment therefore measures **data retransmission** on an
+established connection.
 
-| Metric | No loss | `[FILL: 10]`% loss |
+Commands:
+
+```
+node tcp-chat/bench.js --label exp2-noloss --pings 100 --messages 300
+node tcp-chat/bench.js --label exp2-loss10 --pings 500 --messages 2000 --pause 15   (clumsy Drop 10% started during countdown)
+```
+
+| Metric | No loss | 10% loss (clumsy) |
 |---|---|---|
-| Messages delivered (bench) | `[FILL]`/`[FILL]` | `[FILL]`/`[FILL]` |
-| Retransmissions in capture (Statistics → Expert Info) | `[FILL]` | `[FILL]` |
-| RTT avg / p95 / max (ms) | `[FILL]` | `[FILL]` |
+| Pings (sequential request/response) | 100 | 500 |
+| Pings answered | 100 / 100 | **500 / 500** |
+| RTT min (ms) | 0.273 | 0.419 |
+| RTT avg (ms) | 0.87 | **166.3** |
+| RTT p95 (ms) | 2.24 | **860.7** |
+| RTT max (ms) | 4.93 | **8309.1** |
+| Burst: messages echoed back, in order | 300 / 300 | **2000 / 2000** |
+| Burst time (s) / msg/s | 0.043 / 6974 | 0.242 / 8252 |
 
-**Explanation:** `[FILL: describe one specific retransmission. Example: "Packet 214 is a
-retransmission of packet 198 (same Seq=1234, Len=60). Packets 201–203 are duplicate ACKs
-with Ack=1234, so the sender used fast retransmit. Packet 260 shows an RTO retransmission
-about 210 ms after the original because no duplicate ACKs came back."]` Every message was still
-delivered in order. The cost of reliability is the latency spike seen in max/p95. This is
-head-of-line blocking: later messages wait in the receive buffer until the missing segment arrives.
+`[FILL: Screenshot — exp2-loss.pcapng with filter tcp.analysis.retransmission || tcp.analysis.duplicate_ack]`
+`[FILL: optional — Statistics → Expert Information: number of retransmissions / dup ACKs]`
+
+**What the capture shows** (around packets 2606–2626):
+
+- **`[TCP Previous segment not captured]`** (e.g. 2610, 2624): Wireshark sees a sequence-number gap. That segment was dropped by clumsy before it reached the receiver.
+- **`[TCP Dup ACK 2606#2 … #6]`** (2608–2615): the client (port 2161) keeps acknowledging the same byte, `Ack` stuck at the start of the missing data. It is telling the server "I am still waiting for byte N".
+- **`[TCP Fast Retransmission]`** (2614, 2616): after three or more duplicate ACKs the server resends the missing segment immediately, *with the same sequence number*, without waiting for a timeout.
+- **`[TCP Retransmission]`** (2626, a `FIN, PSH, ACK`): here no duplicate ACKs could arrive (it was the last segment), so the sender waited for the **retransmission timeout (RTO)** before resending (165.263 s vs the original at 164.933 s, about 330 ms).
+- **`[TCP Window Update]`** (2618–2619): once the gap is filled, the receiver delivers the buffered out-of-order data to the application and advertises a larger window again.
+
+**Explanation:** despite 10% loss, **every** ping was answered and all 2000 burst messages
+arrived complete and in order. The application saw no loss at all. The cost was latency. The
+average RTT rose from 0.87 ms to 166 ms, and the worst case to 8.3 s, because when a segment or
+its retransmission is lost again, the RTO doubles each time (exponential backoff). Ping/pong is
+hit hardest: each exchange is a single small segment, so there are never three later segments
+to trigger duplicate ACKs, and every loss costs a full RTO. The burst was barely slowed, because
+many segments were in flight, so losses were repaired quickly by fast retransmit. This is
+**head-of-line blocking**: data behind a missing segment waits in the receiver's buffer until the
+gap is filled, because TCP must deliver bytes in order.
+
+**Messages vs segments (framing evidence):** in this capture packet 75 carries **11,873 bytes**
+of payload (the `welcome` frame including 20 history messages), and packets 2610–2616 carry
+segments of up to **65,495 bytes** (the loopback MSS), each holding *many* 537-byte chat frames
+back to back. One TCP segment ≠ one message. My `FrameDecoder` split them correctly at each `\n`,
+which is why all 2000 messages were counted.
 
 ## 7.3 Experiment 3 — Connection termination
 
