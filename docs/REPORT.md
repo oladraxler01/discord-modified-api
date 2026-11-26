@@ -275,9 +275,10 @@ Nothing at the transport layer. UDP has no sequence numbers or ACKs, so the send
 told and the datagram is gone. Out-of-order datagrams are passed to the application in the
 order they arrive. Any recovery must be built by the application: sequence numbers to detect
 gaps and reordering (as my comparison receiver does: `missing[]`, `outOfOrder`), timeouts and
-retransmission, or forward error correction. My measurements under `[FILL: 10]`% emulated loss
-showed `[FILL: N]`/100 UDP messages received with missing sequence numbers `[FILL: list]`,
-and no recovery. TCP delivered `[FILL: 100]`/100 in order over the same impaired link (§7.5).
+retransmission, or forward error correction. My measurements under 10% emulated loss showed
+**87/100** UDP messages received. 13 sequence numbers (1, 9, 14, 24, 30, 33, 36, 37, 83, 87, 91, 92, …)
+never arrived and were never recovered. TCP delivered **100/100** in order over the same
+impaired link (§7.5).
 
 ## 5.6 Question 6 — How do sockets and port numbers enable process-to-process communication?
 
@@ -554,50 +555,116 @@ OS would eventually report the connection dead. That is the only way the server 
 
 ## 7.4 Experiment 4 — Flow control and performance
 
-| Condition | RTT avg (ms) | RTT p95 (ms) | Throughput (msg/s) | KB/s sent |
-|---|---|---|---|---|
-| A — loopback on VM | `[FILL]` | `[FILL]` | `[FILL]` | `[FILL]` |
-| B — laptop → GCP over Internet | `[FILL]` | `[FILL]` | `[FILL]` | `[FILL]` |
-| C (optional) — loopback + 100 ms netem delay | `[FILL]` | `[FILL]` | `[FILL]` | `[FILL]` |
+**Setup:** `bench.js` against the chat server on my laptop (loopback). Each run measures (a) RTT
+over sequential ping/pong frames and (b) throughput as a burst of 512-character chat messages
+echoed back by the server. The two test conditions are a normal link and a link with **10%
+packet loss** (clumsy). Window sizes were examined in `exp4-perf.pcapng`.
 
-`[FILL: Screenshot — Wireshark with tcp.window_size column / Window Scaling graph]`
-`[FILL: paste ss -tin output: rtt, cwnd, rcv_space, snd_wnd]`
+| Condition | Pings | RTT min | RTT avg | RTT p95 | RTT max | Burst msgs | Burst time | Msg/s | KB/s sent |
+|---|---|---|---|---|---|---|---|---|---|
+| **A — normal loopback** (`exp2-noloss`) | 100 | 0.273 ms | **0.87 ms** | 2.24 ms | 4.93 ms | 300 | 0.043 s | **6974** | 3657 |
+| **B — 10% loss** (`exp2-loss10`) | 500 | 0.419 ms | **166.3 ms** | 860.7 ms | 8309 ms | 2000 | 0.242 s | **8252** | 4328 |
 
-**Explanation:** the window scale factor negotiated in the SYN was `[FILL]`, so the advertised
-receive window was about `[FILL]` bytes. The window `[FILL: stayed large / shrank to X during the
-burst]`, showing the receiver had buffer space, so flow control `[FILL: did / did not]` limit the
-sender. Throughput in B is much lower than in A because each ping must wait one network RTT
-(`[FILL]` ms vs `[FILL]` ms), and the burst test is limited by cwnd growth (slow start) over a
-long-RTT path. For small chat messages, latency is set by RTT, not bandwidth.
+A third run with clumsy's *Lag 100 ms* (`exp4-delay100`: RTT avg 1.68 ms, 2350 msg/s) did not show
+the expected ~200 ms RTT. The lag function did not take effect on loopback traffic in my setup,
+so I don't rely on it.
+
+**Latency:** loss raised the average RTT about 190× and the worst case over 1,600×. A single lost
+ping frame cannot be repaired by fast retransmit (no later segments generate duplicate ACKs),
+so it waits for the retransmission timeout. Repeated losses double the RTO each time
+(exponential backoff), which explains the 8.3 s maximum.
+
+**Throughput:** the burst in condition B still delivered all 2000 messages in order. Its rate was
+not lower than A, because (i) on loopback the bandwidth is effectively unlimited and RTT is
+tiny, (ii) the burst sends many full segments back to back, so lost segments are recovered
+quickly by fast retransmit (Experiment 2 capture), and (iii) the bursts differ in size (300 vs
+2000), so per-run start-up costs weigh differently. On a real long-RTT path, loss would also
+shrink the congestion window and reduce throughput. Loopback can't show that effect.
+
+**Receive window (flow control):** `[FILL: Screenshot — exp4-perf.pcapng with "Calculated window size" column]`
+
+- In the SYN the endpoints negotiated **window scale = 256** (Experiment 1). The 16-bit window field
+  is therefore multiplied by 256.
+- Packet 1400 (client port 2310 → server 5000, ACK) carries the raw window value
+  `0x20B3 = 8371`, so the **calculated window = 8371 × 256 = 2,142,976 bytes (≈ 2 MB)**.
+- During the 500-message burst (packets 1399–1412) the client's advertised window falls from about
+  2,143,7xx to about 2,116,6xx bytes as received data waits in the socket buffer, then rises
+  again once Node reads it. This is flow control: the receiver keeps telling the sender how
+  much space is free. The window never came close to zero, so **flow control never throttled
+  the sender** in these tests. The receiving application (Node's event loop) drains the buffer
+  faster than the burst fills it. A `[TCP Window Update]` was observed in Experiment 2 after a
+  retransmission filled a gap and the buffered out-of-order data was released to the application.
+
+**Conclusion:** for a chat application, performance is dominated by **latency and loss
+recovery**, not by bandwidth or the receive window. Small messages are sent one at a time and
+each user waits for the round trip. TCP's reliability costs very little on a clean link but
+causes large, user-visible delays under loss.
 
 ## 7.5 TCP versus UDP practical comparison
 
-**Method:** `tcp-chat/compare/run-all.sh` on the VM over loopback. 100 numbered messages,
-20 ms apart, sent with each protocol, first at baseline and then with `tc netem loss
-[FILL: 10]%`. The receiver echoes each message, so the sender measures RTT with one clock.
+**Method:** a separate tool, not part of the chat (`tcp-chat/compare/`). `receiver.js` listens on
+UDP 6001 and TCP 6002. `sender.js` sends **100 numbered messages** (`{"type":"data","seq":n,…}`),
+one every 20 ms, and the receiver echoes each one back so the sender measures RTT with a single
+clock. For each protocol I ran a **baseline** and then **10% loss**: clumsy *Drop 10%* with
+filter `outbound and ip.DstAddr >= 127.0.0.1 and ip.DstAddr <= 127.255.255.255 and (udp.DstPort
+== 6001 or udp.SrcPort == 6001 or tcp.DstPort == 6002 or tcp.SrcPort == 6002)`, switched on
+after the TCP connection was established (`--pause 10`). Results are in
+`tcp-chat/compare/results/*.json|csv` and `RESULTS.md` (from `node tcp-chat/compare/summarize.js`).
 
-`[FILL: paste tcp-chat/compare/results/RESULTS.md table here]`
+Commands (Windows, loopback):
 
-| Condition | Protocol | Sent | Received | Loss % | Missing | Out of order | RTT avg | RTT max |
-|---|---|---|---|---|---|---|---|---|
-| baseline | TCP | 100 | `[FILL]` | | | | | |
-| baseline | UDP | 100 | `[FILL]` | | | | | |
-| loss`[FILL]` | TCP | 100 | `[FILL]` | | | | | |
-| loss`[FILL]` | UDP | 100 | `[FILL]` | | | | | |
+```
+node tcp-chat/compare/receiver.js --proto udp --port 6001 --label baseline   (then --label loss10)
+node tcp-chat/compare/receiver.js --proto tcp --port 6002 --label baseline   (then --label loss10)
+node tcp-chat/compare/sender.js --proto udp --port 6001 --count 100 --label baseline
+node tcp-chat/compare/sender.js --proto tcp --port 6002 --count 100 --label baseline
+node tcp-chat/compare/sender.js --proto udp --port 6001 --count 100 --label loss10 --pause 10
+node tcp-chat/compare/sender.js --proto tcp --port 6002 --count 100 --label loss10 --pause 10
+node tcp-chat/compare/summarize.js
+```
 
-**Discussion:** `[FILL: e.g. "At baseline both protocols delivered 100/100. Under 10% loss UDP
-delivered 91/100 (missing 7, 22, …) with no retransmission and an almost unchanged RTT. TCP
-delivered 100/100 in order, but its maximum RTT rose from 0.6 ms to 212 ms because of
-retransmission timeouts."]`
+**Raw results**
 
-**What the results do and don't prove:**
+| Condition | Protocol | Sent | Received (unique) | Loss % | Missing seq numbers | Duplicates | Out of order | RTT avg ms | RTT p95 ms | RTT max ms |
+|---|---|---|---|---|---|---|---|---|---|---|
+| baseline | TCP | 100 | 100 | 0 | none | 0 | 0 | 0.594 | 1.075 | 4.123 |
+| baseline | UDP | 100 | 100 | 0 | none | 0 | 0 | 0.774 | 1.358 | 4.487 |
+| 10% loss | TCP | 100 | **100** | **0** | none | 0 | 0 | **18.19** | **87.73** | **128.28** |
+| 10% loss | UDP | 100 | **87** | **13** | 1, 9, 14, 24, 30, 33, 36, 37, 83, 87, 91, 92, … (13 total) | 0 | 0 | 1.634 | 2.726 | 6.44 |
 
-- They *show* that under random loss UDP loses data with no recovery and TCP recovers at a latency cost.
-- They *don't* prove behaviour on real congested networks. netem drops packets at random and
-  independently, whereas real loss comes in bursts and is related to queues.
-- 100 messages is a small sample. The loss rate measured will differ from the configured rate (e.g. 9% vs 10%).
-- Loopback almost never reorders packets, so seeing no UDP reordering does **not** mean UDP preserves order.
-- UDP RTT counts loss in both directions, because the echo can also be lost. The receiver's count is the one-way figure.
+`[FILL: replace "…" with the 13th missing number from tcp-chat/compare/results/loss10-udp-receiver.json]`
+
+**Discussion:**
+
+- **Baseline:** both protocols delivered 100/100 in order with sub-millisecond average RTT. On a
+  clean link, TCP's extra machinery costs nothing visible.
+- **Under 10% loss, UDP** delivered 87/100. The 13 missing messages, including the very first
+  one (seq 1), were simply gone. UDP gave no error, no retransmission and no notification, and
+  the receiver only knew because of my sequence numbers. Its RTT stayed low (1.6 ms average),
+  because nothing ever waits for a lost packet.
+- **Under 10% loss, TCP** delivered **all 100, in order, without duplicates**. The cost was
+  latency: average RTT rose about 30× (0.59 → 18.2 ms), and the worst message took 128 ms,
+  because it waited for retransmission.
+- **Recovery:** TCP recovered every loss automatically (Experiment 2 shows how: duplicate ACKs,
+  fast retransmit, RTO). UDP recovered none.
+- The measured UDP loss (13%) is higher than the configured 10%: random variation over only 100
+  samples.
+
+**What these results do and do not prove:**
+
+- They **do** show the core trade-off: TCP gives completeness and order at the cost of delay
+  under loss, while UDP keeps latency low but loses data silently.
+- They **do not** prove behaviour on real networks. clumsy drops packets at random and
+  independently on loopback. Real loss tends to come in bursts, linked to congestion and queues,
+  and adds real propagation delay.
+- **100 messages is a small sample.** Repeating the runs would give confidence intervals.
+- **No out-of-order UDP arrivals were seen**, but that is because loopback doesn't reorder packets.
+  It does **not** mean UDP preserves order.
+- UDP's echo-based RTT only covers messages whose request *and* echo both survived. The
+  receiver's count (87) is the correct one-way delivery figure.
+- The "one-way latency" values (e.g. −1 ms for TCP) are rounding artefacts of the
+  millisecond-resolution clock on Windows. The sender's high-resolution RTT is the reliable
+  latency metric.
 
 # 8. Cloud Deployment
 
