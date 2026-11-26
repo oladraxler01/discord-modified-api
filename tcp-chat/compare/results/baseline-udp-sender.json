@@ -1,0 +1,17 @@
+{
+  "protocol": "UDP",
+  "label": "baseline",
+  "target": "127.0.0.1:6001",
+  "sent": 100,
+  "intervalMs": 20,
+  "echoesReceived": 100,
+  "echoLossPercent": 0,
+  "rttMs": {
+    "min": 0.513,
+    "avg": 0.774,
+    "p95": 1.358,
+    "max": 4.487
+  },
+  "sendDurationMs": 3170,
+  "finishedAt": "2026-11-26T12:27:09.177Z"
+}

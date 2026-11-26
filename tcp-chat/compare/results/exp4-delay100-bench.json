@@ -1,0 +1,20 @@
+{
+  "label": "exp4-delay100",
+  "target": "127.0.0.1:5000",
+  "rttMs": {
+    "min": 0.632,
+    "avg": 1.675,
+    "p95": 2.841,
+    "max": 9.18
+  },
+  "pings": 50,
+  "throughput": {
+    "messages": 500,
+    "messageChars": 512,
+    "frameBytesSent": 537,
+    "seconds": 0.213,
+    "messagesPerSecond": 2350.1,
+    "sendKBps": 1232.4
+  },
+  "finishedAt": "2026-11-26T12:09:49.078Z"
+}

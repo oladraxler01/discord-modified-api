@@ -1,0 +1,21 @@
+{
+  "protocol": "TCP",
+  "label": "baseline",
+  "expected": 100,
+  "received": 100,
+  "unique": 100,
+  "lossPercent": 0,
+  "missing": [],
+  "duplicates": 0,
+  "outOfOrder": 0,
+  "inOrder": true,
+  "oneWayLatencyMs": {
+    "min": -1,
+    "avg": -0.43,
+    "p95": 0,
+    "max": 1,
+    "note": "Valid only when sender and receiver run on the same machine (shared clock)."
+  },
+  "durationMs": 3171,
+  "finishedAt": "2026-11-26T12:27:28.659Z"
+}

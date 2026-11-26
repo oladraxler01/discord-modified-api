@@ -1,0 +1,20 @@
+{
+  "label": "exp2-noloss",
+  "target": "127.0.0.1:5000",
+  "rttMs": {
+    "min": 0.273,
+    "avg": 0.87,
+    "p95": 2.241,
+    "max": 4.928
+  },
+  "pings": 100,
+  "throughput": {
+    "messages": 300,
+    "messageChars": 512,
+    "frameBytesSent": 537,
+    "seconds": 0.043,
+    "messagesPerSecond": 6974.3,
+    "sendKBps": 3657.4
+  },
+  "finishedAt": "2026-11-26T11:50:40.967Z"
+}

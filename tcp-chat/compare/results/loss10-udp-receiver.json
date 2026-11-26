@@ -1,0 +1,35 @@
+{
+  "protocol": "UDP",
+  "label": "loss10",
+  "expected": 100,
+  "received": 87,
+  "unique": 87,
+  "lossPercent": 13,
+  "missing": [
+    1,
+    9,
+    14,
+    24,
+    30,
+    33,
+    36,
+    37,
+    83,
+    87,
+    91,
+    92,
+    98
+  ],
+  "duplicates": 0,
+  "outOfOrder": 0,
+  "inOrder": true,
+  "oneWayLatencyMs": {
+    "min": 0,
+    "avg": 0.989,
+    "p95": 2,
+    "max": 3,
+    "note": "Valid only when sender and receiver run on the same machine (shared clock)."
+  },
+  "durationMs": 3120,
+  "finishedAt": "2026-11-26T12:35:36.967Z"
+}

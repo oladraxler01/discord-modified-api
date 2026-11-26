@@ -1,0 +1,17 @@
+{
+  "protocol": "TCP",
+  "label": "loss10",
+  "target": "127.0.0.1:6002",
+  "sent": 100,
+  "intervalMs": 20,
+  "echoesReceived": 100,
+  "echoLossPercent": 0,
+  "rttMs": {
+    "min": 0.76,
+    "avg": 18.19,
+    "p95": 87.732,
+    "max": 128.276
+  },
+  "sendDurationMs": 3199,
+  "finishedAt": "2026-11-26T12:36:29.173Z"
+}
