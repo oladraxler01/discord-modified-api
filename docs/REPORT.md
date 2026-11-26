@@ -780,11 +780,9 @@ real Internet path (Nigeria ↔ Render's data centre).
 
 ![Figure 20 — Phone on LTE: user James connected to veil-tcp-chat.onrender.com (TCP connection #539 via the gateway), receives ola’s message and replies](screenshots/fig20-cloud-phone-lte.jpg){width=45%}
 
-![Figure 21 — Laptop: user ola on the same deployment; James joined; RTT 256 ms; both users online](screenshots/fig21-cloud-laptop.png){width=100%}
 
-![Figure 22 — Render logs: internal TCP connections to 127.0.0.1:5000; non-JSON probes rejected as malformed without crashing; FIN and RST closes logged](screenshots/fig22-render-logs.png){width=100%}
 
-**Unexpected evidence (Figure 22):** the Render logs show many short connections to
+**Unexpected evidence (Render logs):** the Render logs show many short connections to
 `127.0.0.1:5000` that send non-JSON data. These come from Render's own internal port detection
 probing the listening ports inside the container, which is also why the connection numbers
 reached #469 and #539. My server rejected every probe with
@@ -925,6 +923,6 @@ Wireshark display filters used: `tcp.port == 5000`, `tcp.analysis.retransmission
 | 16–17 | screenshots/fig16–17 | Experiment 4: receive window |
 | 18 | screenshots/fig18 | TCP vs UDP comparison table |
 | 19 | screenshots/fig19 | GCP project without a billing account (card verification failed) |
-| 20–22 | screenshots/fig20–22 | Live cloud chat: phone on LTE, laptop, Render logs |
+| 20 | screenshots/fig20 | Live cloud chat: phone on LTE |
 
 Packet captures submitted: `exp1-handshake.pcapng`, `exp2-loss.pcapng`, `exp3-crash.pcapng`, `exp4-perf.pcapng`.
