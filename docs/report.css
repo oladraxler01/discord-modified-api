@@ -1,0 +1,16 @@
+@page { size: A4; margin: 18mm 16mm; }
+body { font-family: "Segoe UI", Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #111; max-width: none; margin: 0; }
+header#title-block-header { text-align: center; margin: 40mm 0 20mm; page-break-after: always; }
+h1.title { font-size: 22pt; color: #1e3a8a; } p.subtitle { font-size: 14pt; color: #334155; } p.author, p.date { font-size: 12pt; }
+nav#TOC { page-break-after: always; } nav#TOC ul { list-style: none; padding-left: 14px; } nav#TOC > ul { padding-left: 0; } nav#TOC a { color: #111; text-decoration: none; }
+nav#TOC::before { content: "Contents"; font-size: 18pt; font-weight: 700; color: #1e3a8a; display: block; margin-bottom: 8px; }
+h1 { font-size: 17pt; color: #1e3a8a; border-bottom: 2px solid #c7d2fe; padding-bottom: 3px; page-break-before: always; margin-top: 0; }
+h2 { font-size: 13pt; color: #1e40af; page-break-after: avoid; } h3 { font-size: 11.5pt; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 9pt; page-break-inside: auto; }
+th, td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; } th { background: #eef2ff; }
+tr { page-break-inside: avoid; }
+code { font-family: Consolas, "Courier New", monospace; font-size: 8.8pt; background: #f1f5f9; padding: 0 2px; }
+pre { background: #f8fafc; border: 1px solid #e2e8f0; padding: 8px; font-size: 8.3pt; white-space: pre-wrap; word-break: break-all; page-break-inside: avoid; }
+pre code { background: none; }
+figure { margin: 10px 0; text-align: center; page-break-inside: avoid; } figure img { max-width: 100%; max-height: 210mm; } figcaption { font-size: 9pt; font-style: italic; color: #475569; }
+blockquote { border-left: 4px solid #f59e0b; background: #fffbeb; margin: 0; padding: 6px 10px; }

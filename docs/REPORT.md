@@ -5,8 +5,6 @@ author: "Ogunkuade Olasunkanmi — VUG/CSC/24/12403"
 date: "Department of Computer Science, Veritas University Abuja — 28 November 2026"
 ---
 
-> **Before submitting:** read every section aloud once. You must be able to explain each
-> sentence during the practical defence. Delete this box before submitting.
 
 # 1. Introduction and Objectives
 
