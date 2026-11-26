@@ -1,6 +1,7 @@
 // Command-line TCP chat client.
 //
-//   node tcp-chat/client.js --host 34.12.34.56 --port 5000 --name ola
+//   node tcp-chat/client.js --host 34.12.34.56 --port 5000 --name ola          (raw TCP)
+//   node tcp-chat/client.js --url wss://your-app.onrender.com/ws --name ola     (via WebSocket gateway)
 //
 // Commands:  plain text = group message
 //            /dm <user> <text>   private message
@@ -31,37 +32,70 @@ const print = (line) => {
 };
 const time = (ts) => new Date(ts).toLocaleTimeString();
 
-const decoder = new FrameDecoder();
-const socket = net.createConnection({ host, port });
-socket.setNoDelay(true);
+const url = arg("url", null);
 
 let identified = false;
 let quitting = false;
 const pending = []; // lines typed before the server accepted our username
 
-const sendFrame = (message) => {
-  if (!socket.destroyed && socket.writable) socket.write(encode(message));
-};
+// Transport: raw TCP socket (default) or WebSocket to the gateway (--url). Both run over TCP.
+let sendFrame;
+let closeGracefully;
+let crash;
+
+if (url) {
+  // Node 22+ has a built-in WebSocket client. WebSocket has its own message framing.
+  const ws = new WebSocket(url);
+  sendFrame = (message) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); };
+  closeGracefully = () => ws.close(1000);
+  crash = () => { print("(/crash is only available on raw TCP; closing WebSocket)"); ws.close(4000); };
+  ws.addEventListener("open", () => {
+    print(`Connected (WebSocket over TCP/TLS) to ${url}`);
+    sendFrame({ type: "hello", username });
+  });
+  ws.addEventListener("message", (e) => onMessage(JSON.parse(e.data)));
+  ws.addEventListener("error", () => print("Connection error (WebSocket)."));
+  ws.addEventListener("close", (e) => {
+    print(`Disconnected (WebSocket close code ${e.code}).`);
+    process.exit(0);
+  });
+} else {
+  const decoder = new FrameDecoder();
+  const socket = net.createConnection({ host, port });
+  socket.setNoDelay(true);
+  sendFrame = (message) => {
+    if (!socket.destroyed && socket.writable) socket.write(encode(message));
+  };
+  closeGracefully = () => socket.end(); // FIN
+  crash = () => socket.resetAndDestroy(); // RST instead of FIN
+  socket.on("connect", () => {
+    print(
+      `Connected (TCP) ${socket.localAddress}:${socket.localPort} -> ${socket.remoteAddress}:${socket.remotePort}`,
+    );
+    sendFrame({ type: "hello", username });
+  });
+  socket.on("data", (chunk) => {
+    for (const { message, error } of decoder.push(chunk)) {
+      if (error) print(`! bad frame from server: ${error}`);
+      else onMessage(message);
+    }
+  });
+  socket.on("end", () => print("Server closed the connection (FIN received)."));
+  socket.on("error", (e) => print(`Connection error: ${e.code || e.message}`));
+  socket.on("close", () => {
+    print("Disconnected.");
+    process.exit(0);
+  });
+}
+
 const quit = () => {
   if (quitting) return;
   quitting = true;
   if (identified) sendFrame({ type: "bye" });
-  else socket.end(); // not joined yet: just close (FIN)
+  else closeGracefully(); // not joined yet: just close
 };
 
-socket.on("connect", () => {
-  print(
-    `Connected (TCP) ${socket.localAddress}:${socket.localPort} -> ${socket.remoteAddress}:${socket.remotePort}`,
-  );
-  sendFrame({ type: "hello", username });
-});
-
-socket.on("data", (chunk) => {
-  for (const { message, error } of decoder.push(chunk)) {
-    if (error) {
-      print(`! bad frame from server: ${error}`);
-      continue;
-    }
+function onMessage(message) {
     switch (message.type) {
       case "welcome":
         identified = true;
@@ -91,23 +125,19 @@ socket.on("data", (chunk) => {
         print(`! ${message.code}: ${message.message}`);
         if (!identified && ["username_taken", "invalid_username"].includes(message.code)) {
           print("Choose another name with --name. Exiting.");
-          socket.end();
+          closeGracefully();
         }
         break;
       case "bye":
+        if (url) closeGracefully();
+        break;
+      case "gateway":
+        print(`Gateway opened TCP 127.0.0.1:${message.tcpLocalPort} -> chat server :${message.tcpServerPort}`);
         break;
       default:
         print(`? ${JSON.stringify(message)}`);
     }
-  }
-});
-
-socket.on("end", () => print("Server closed the connection (FIN received)."));
-socket.on("error", (e) => print(`Connection error: ${e.code || e.message}`));
-socket.on("close", () => {
-  print("Disconnected.");
-  process.exit(0);
-});
+}
 
 const handleLine = (line) => {
   const text = line.trim();
@@ -119,7 +149,7 @@ const handleLine = (line) => {
   if (text === "/quit") {
     quit();
   } else if (text === "/crash") {
-    socket.resetAndDestroy(); // sends RST instead of FIN
+    crash();
   } else if (text === "/users") {
     sendFrame({ type: "list" });
   } else if (text === "/ping") {
