@@ -276,7 +276,7 @@ told and the datagram is gone. Out-of-order datagrams are passed to the applicat
 order they arrive. Any recovery must be built by the application: sequence numbers to detect
 gaps and reordering (as my comparison receiver does: `missing[]`, `outOfOrder`), timeouts and
 retransmission, or forward error correction. My measurements under 10% emulated loss showed
-**87/100** UDP messages received. 13 sequence numbers (1, 9, 14, 24, 30, 33, 36, 37, 83, 87, 91, 92, …)
+**87/100** UDP messages received. 13 sequence numbers (1, 9, 14, 24, 30, 33, 36, 37, 83, 87, 91, 92, 98)
 never arrived and were never recovered. TCP delivered **100/100** in order over the same
 impaired link (§7.5).
 
@@ -630,9 +630,7 @@ node tcp-chat/compare/summarize.js
 | baseline | TCP | 100 | 100 | 0 | none | 0 | 0 | 0.594 | 1.075 | 4.123 |
 | baseline | UDP | 100 | 100 | 0 | none | 0 | 0 | 0.774 | 1.358 | 4.487 |
 | 10% loss | TCP | 100 | **100** | **0** | none | 0 | 0 | **18.19** | **87.73** | **128.28** |
-| 10% loss | UDP | 100 | **87** | **13** | 1, 9, 14, 24, 30, 33, 36, 37, 83, 87, 91, 92, … (13 total) | 0 | 0 | 1.634 | 2.726 | 6.44 |
-
-`[FILL: replace "…" with the 13th missing number from tcp-chat/compare/results/loss10-udp-receiver.json]`
+| 10% loss | UDP | 100 | **87** | **13** | 1, 9, 14, 24, 30, 33, 36, 37, 83, 87, 91, 92, 98 (13 total) | 0 | 0 | 1.634 | 2.726 | 6.44 |
 
 **Discussion:**
 
