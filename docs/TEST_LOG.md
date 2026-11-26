@@ -61,8 +61,8 @@ Run on: Linux container, Node.js v22.23.5, 25 Nov 2026. Result: **14/14 passed**
 
 | ID | Run | Output file | Done |
 |---|---|---|---|
-| D1 | Exp 1 handshake capture | `captures/exp1-handshake.pcap` | ⏳ |
-| D2 | Exp 2 loss capture + bench | `captures/exp2-loss.pcap`, `results/exp2-loss10-bench.json` | ⏳ |
-| D3 | Exp 3 termination capture | `captures/exp3-termination.pcap` | ⏳ |
-| D4 | Exp 4 bench A/B(/C) + capture | `results/A-loopback-bench.json`, `results/B-internet-bench.json`, `captures/exp4-perf.pcap` | ⏳ |
-| D5 | TCP vs UDP comparison | `results/RESULTS.md` + JSON/CSV | ⏳ |
+| D1 | Exp 1 handshake capture (loopback, Windows) | `exp1-handshake.pcapng` | ✅ 26 Nov |
+| D2 | Exp 2 loss capture + bench (clumsy 10%) | `exp2-loss.pcapng`, `results/exp2-noloss-bench.json`, `results/exp2-loss10-bench.json` | ✅ 26 Nov |
+| D3 | Exp 3 termination captures (FIN client-side, FIN server-side, RST) | `exp1-handshake.pcapng`, `exp3-crash.pcapng` | ✅ 26 Nov |
+| D4 | Exp 4 bench (normal vs 10% loss) + window capture | `results/exp2-*-bench.json`, `exp4-perf.pcapng` | ✅ 26 Nov |
+| D5 | TCP vs UDP comparison (baseline + 10% loss) | `results/RESULTS.md` + JSON/CSV | ✅ 26 Nov — UDP 87/100, TCP 100/100 under loss |
