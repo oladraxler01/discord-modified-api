@@ -448,22 +448,71 @@ head-of-line blocking: later messages wait in the receive buffer until the missi
 
 ## 7.3 Experiment 3 — Connection termination
 
-`[FILL: Screenshot A — graceful close: FIN,ACK / ACK / FIN,ACK / ACK]`
-`[FILL: Screenshot B — abrupt close: RST]`
-`[FILL: Screenshot C — server log lines for both]`
+**Setup:** loopback on my laptop, Wireshark on the Npcap loopback adapter, filter
+`tcp.port == 5000`. Captures: `exp1-handshake.pcapng` (client-initiated graceful close) and
+`exp3-termination.pcapng` (server-initiated graceful close, then an abrupt client crash).
 
-| | Graceful (`/quit`) | Abrupt (`/crash` or kill) |
+`[FILL: Screenshot A — exp3 packet list showing packets 178–183 (FIN) and 320 (RST)]`
+`[FILL: Screenshot B — server terminal log for both cases]`
+
+**Case 1: graceful close started by the client (`/quit`), from `exp1-handshake.pcapng`**
+
+| Pkt | Direction | Flags | Meaning |
+|---|---|---|---|
+| 132 | client → server | PSH, ACK, Len=15 | `{"type":"bye"}\n` |
+| 134 | server → client | PSH, ACK, Len=15 | server replies `bye`, then calls `socket.end()` |
+| 136 | server → client | **FIN, ACK** | server has no more data to send |
+| 137 | client → server | ACK | acknowledges the server's FIN |
+| 138 | client → server | **FIN, ACK** | client closes its direction too |
+| 139 | server → client | ACK | connection fully closed |
+
+**Case 2: graceful close started by the server (Ctrl+C → SIGTERM/SIGINT handler), `exp3-termination.pcapng`, client "normal" on port 1348**
+
+| Pkt | Direction | Flags | Meaning |
+|---|---|---|---|
+| 178 | server → client | PSH, ACK, Len=79 | `{"type":"error","code":"server_shutdown",…}` |
+| 180 | server → client | **FIN, ACK** | server's `socket.end()` |
+| 181 | client → server | ACK | |
+| 182 | client → server | **FIN, ACK** | client prints "Server closed the connection (FIN received)" |
+| 183 | server → client | ACK | |
+
+Server log: `shutdown {"signal":"SIGINT","clients":1}`, then `peer_fin_received {"username":"normal"}`.
+
+**Case 3: abrupt termination (`/crash` = `socket.resetAndDestroy()`), same capture, client "crasher" on port 1462**
+
+| Pkt | Direction | Flags | Meaning |
+|---|---|---|---|
+| 283–285 | both | SYN / SYN, ACK / ACK | new connection (new ephemeral port 1462) |
+| 286 | client → server | PSH, ACK, Len=38 | `{"type":"hello","username":"crasher"}\n` |
+| 288 | server → client | PSH, ACK, Len=170 | `welcome` |
+| **320** | client → server | **RST, ACK** | the connection is torn down immediately: no FIN and no reply expected |
+
+Server log (real output):
+
+```
+2026-11-26T11:39:01.671Z [WARN] socket_error {"id":1,"username":"crasher","code":"ECONNRESET"}
+2026-11-26T11:39:01.690Z [INFO] connection_closed {"id":1,"peer":"127.0.0.1:1462","username":"crasher","reason":"connection_reset","total":0}
+```
+
+**Comparison**
+
+| | Graceful (FIN) | Abrupt (RST) |
 |---|---|---|
-| Packets observed | `[FILL]` | `[FILL]` |
-| Who sent FIN/RST first | `[FILL]` | `[FILL]` |
-| Server event / log | `peer_fin_received` → `connection_closed reason=quit` | `socket_error ECONNRESET` → `connection_closed reason=connection_reset` |
-| Other users notified | `left (quit)` | `left (connection_reset)` |
-| TIME_WAIT | On the side that closed first, `[FILL: seen with ss -tan state time-wait]` | None (RST skips it) |
+| Packets | 4 (FIN, ACK, FIN, ACK). Each direction is closed separately (half-close) | 1 (RST). Both directions die at once |
+| Data in flight | Delivered first: FIN comes *after* all data (e.g. `bye` and `server_shutdown` arrived before the FIN) | Any unsent or unread data is discarded |
+| Server event | `'end'` → `peer_fin_received` → `'close'` | `'error'` with `ECONNRESET` → `'close'` |
+| Logged reason | `quit` / `closed` | `connection_reset` |
+| TIME_WAIT | Yes, on the side that sent the first FIN (here the server, packets 136 and 180), for 2×MSL | No: RST skips TIME_WAIT |
 
-**Server-side cleanup:** in both cases the `close` handler removes the client from the
-`clients` Map (freeing the username), logs the reason and broadcasts `left`. Neither case leaks
-memory or leaves a stale username. `[FILL: optional — describe the silent-failure test (Wi-Fi
-off) and how long until keep-alive or the idle timeout removed the user]`.
+**Server-side cleanup:** in all three cases the `'close'` handler ran. It removed the client
+from the `clients` Map (so the username can be reused), logged the reason and broadcast `left` to
+the remaining users. `total` dropped back to 0 in the log, so no connection state was leaked.
+
+**Keep-alive (bonus observation):** packets 82/83, 124/125 and 162/163 are `[TCP Keep-Alive]`
+probes from the server (port 5000) exactly 30 s apart while the "normal" client was idle, each
+answered by a `[TCP Keep-Alive ACK]`. This is `socket.setKeepAlive(true, 30000)`. If the client
+had disappeared silently (Wi-Fi off, no FIN and no RST), these probes would go unanswered and the
+OS would eventually report the connection dead. That is the only way the server can detect that case.
 
 ## 7.4 Experiment 4 — Flow control and performance
 
