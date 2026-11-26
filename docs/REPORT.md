@@ -31,7 +31,7 @@ connections, frames messages itself, validates input, and handles orderly (FIN) 
 5. Deploy and validate the application on a public cloud platform, securely and at minimal cost.
 
 **Repository:** `https://github.com/oladraxler01/discord-modified-api` (branch
-`[FILL: branch name you submit, e.g. main]`), folder `tcp-chat/`.
+`claude/jolly-davinci-db5797`), folder `tcp-chat/`.
 
 # 2. System Requirements
 
@@ -61,9 +61,9 @@ connections, frames messages itself, validates input, and handles orderly (FIN) 
 | Item | Value |
 |---|---|
 | Server OS | Ubuntu 24.04 LTS on GCP e2-micro (2 shared vCPU, 1 GB RAM) |
-| Runtime | Node.js `[FILL: output of node -v on the VM]` |
-| Client machines | `[FILL: e.g. Windows 11 laptop, Node 22; second laptop/phone]` |
-| Tools | Wireshark `[FILL: version]`, tcpdump, iproute2 (`tc`, `ss`) |
+| Runtime | Node.js v24.12.0 (laptop) |
+| Client machines | Windows laptop (server and clients run as separate processes), PowerShell terminals in VS Code |
+| Tools | Wireshark 4.6.10 with Npcap (loopback capture), clumsy 0.3 (packet loss/delay on Windows) |
 
 # 3. System Architecture
 
@@ -196,16 +196,23 @@ S→C {"type":"bye"}
 | 10 errors on one connection | `error too_many_errors`, then FIN |
 | Line > 16 KiB without `\n` | `error malformed`, then FIN |
 
-Sample log lines (`[FILL: replace with lines from your own server.log]`):
+Real log lines from my server during Experiment 3 (see Figure 15):
 
 ```
-2026-11-25T21:57:43.302Z [INFO] connection_open {"id":1,"peer":"127.0.0.1:33752","local":"127.0.0.1:5055","total":1}
-2026-11-25T21:57:43.303Z [INFO] user_joined {"id":1,"peer":"127.0.0.1:33752","username":"bob"}
-2026-11-25T21:57:45.580Z [INFO] peer_fin_received {"id":1,"username":"bob"}
-2026-11-25T21:57:45.581Z [INFO] connection_closed {"id":1,"peer":"127.0.0.1:33752","username":"bob","reason":"quit","total":1}
-2026-11-25T21:57:46.081Z [WARN] socket_error {"id":2,"username":"ola","code":"ECONNRESET"}
-2026-11-25T21:57:46.081Z [INFO] connection_closed {"id":2,"peer":"127.0.0.1:33762","username":"ola","reason":"connection_reset","total":0}
+2026-11-26T11:36:06.135Z [INFO] connection_open {"id":1,"peer":"127.0.0.1:1348","local":"127.0.0.1:5000","total":1}
+2026-11-26T11:36:06.178Z [INFO] user_joined {"id":1,"peer":"127.0.0.1:1348","username":"normal"}
+2026-11-26T11:37:46.691Z [INFO] shutdown {"signal":"SIGINT","clients":1}
+2026-11-26T11:37:46.706Z [INFO] peer_fin_received {"id":1,"username":"normal"}
+2026-11-26T11:38:06.913Z [INFO] listening {"host":"0.0.0.0","port":5000,"pid":8572}
+2026-11-26T11:38:53.458Z [INFO] connection_open {"id":1,"peer":"127.0.0.1:1462","local":"127.0.0.1:5000","total":1}
+2026-11-26T11:38:54.046Z [INFO] user_joined {"id":1,"peer":"127.0.0.1:1462","username":"crasher"}
+2026-11-26T11:39:01.671Z [WARN] socket_error {"id":1,"username":"crasher","code":"ECONNRESET"}
+2026-11-26T11:39:01.690Z [INFO] connection_closed {"id":1,"peer":"127.0.0.1:1462","username":"crasher","reason":"connection_reset","total":0}
 ```
+
+Starting a second server while the first was still running produced
+`server_error {"code":"EADDRINUSE","message":"listen EADDRINUSE: address already in use 0.0.0.0:5000"}`.
+Only one process can listen on a given IP:port, so the OS refused the second `bind`.
 
 # 5. TCP versus UDP Analysis
 
@@ -289,9 +296,9 @@ endpoint that a process uses to send and receive, bound to (IP, port).
 
 In my system the server process calls `listen(5000)`, so the kernel delivers every segment
 arriving for port 5000 to it. Each client's kernel picks a free ephemeral port
-(`[FILL: e.g. 51234]` in my capture). After `accept`, the server holds one connected socket per
+(**16414** in my Experiment 1 capture, and 1348 and 1462 in Experiment 3). After `accept`, the server holds one connected socket per
 client, identified by the 4-tuple, for example
-`([FILL: client public IP], [FILL: client port]) ↔ (10.128.0.2, 5000)`. A TCP connection is
+`(127.0.0.1, 16414) ↔ (127.0.0.1, 5000)` in Experiment 1. In my local tests three clients were connected to the same server port at once (Figures 3–6: ports 5911, 5938 and 6012). A TCP connection is
 demultiplexed by the full 4-tuple, so ten clients can all talk to port 5000 at once. A UDP
 socket is demultiplexed by destination port only. The `welcome` message reports both endpoints
 back to the client, so the 4-tuple can be read live during the demonstration. On GCP the server
@@ -343,7 +350,7 @@ one read. Without a delimiter or length prefix the receiver can't know where a m
 | Graceful close = FIN exchange; crash = RST | Exp 3 captures and server log (§7.3) |
 | Receiver advertises a window; RTT dominates chat performance | Exp 4: window column, `ss -tin`, bench results (§7.4) |
 | UDP gives no recovery; TCP does at a latency cost | Comparison table and capture (§7.5) |
-| Messages don't line up with segments | Exp 2/4: one TCP segment containing several `\n`-terminated frames (`[FILL: packet number]`) |
+| Messages don't line up with segments | Exp 2/4: one TCP segment containing several `\n`-terminated frames (packet 75: 11,873 bytes; packets 2610–2616: up to 65,495 bytes) |
 
 # 6. Testing and Results
 
@@ -366,11 +373,31 @@ one read. Without a delimiter or length prefix the receiver can't know where a m
 | 13 | Malformed input and invalid values don't crash the server | ✅ Pass |
 | 14 | Frames split across real TCP writes and combined in one write | ✅ Pass |
 
-Total: **14 passed, 0 failed** (Node.js 22). `[FILL: paste a screenshot of the npm run tcp:test output from your machine]`
+Total: **14 passed, 0 failed**, both in development (Node.js 22) and on my Windows laptop (Node.js 24.12.0):
+
+```
+✔ frames split across TCP writes and combined in one write (91.7769ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3230.2533
+```
 
 ## 6.2 Manual and cloud tests
 
-See the full test log in `docs/TEST_LOG.md`. Summary: `[FILL: e.g. 3 clients on 2 networks, reconnect, malformed via netcat, all passed]`.
+See the full test log in `docs/TEST_LOG.md`. Local manual tests on my laptop: two users chatted in both directions, `/ping` measured 1.24 ms RTT, a graceful `/quit` (FIN) and an abrupt `/crash` (RST) were both detected and reported to the other user, and a client reconnected and received the message history while the other user stayed connected.
+
+![Figure 3 — Client “ola”: connects from ephemeral port 5911, sends and receives group messages](screenshots/fig03-local-chat-ola.png){width=70%}
+
+![Figure 4 — Client “bob” on port 5938 receives ola’s message #1 and sends #2](screenshots/fig04-local-chat-bob.png){width=70%}
+
+![Figure 5 — bob quits (FIN received), reconnects on new port 6012, gets history, then sees ola leave with connection_reset](screenshots/fig05-bob-quit-rejoin.png){width=70%}
+
+![Figure 6 — ola measures RTT (1.24 ms), sees bob leave (quit) and rejoin, then disconnects abruptly with /crash](screenshots/fig06-ola-ping-crash.png){width=80%}
 
 # 7. Compulsory TCP Investigations
 
@@ -384,10 +411,9 @@ test usernames and test text only.
 (127.0.0.1). The capture was taken in Wireshark 4.6.10 on "Adapter for loopback traffic capture"
 (Npcap), with display filter `tcp.port == 5000` and relative sequence numbers turned off, so the
 real ISNs are shown. File: `exp1-handshake.pcapng`.
-`[FILL: if you get a cloud VM, repeat this over the Internet and add a second table]`
+![Figure 7 — exp1-handshake.pcapng: SYN (53), SYN-ACK (54), ACK (55), data frames, keep-alive (122–123) and FIN close (136–139)](screenshots/fig07-exp1-packet-list.png){width=100%}
 
-`[FILL: Screenshot — Wireshark packet list, packets 53–55 highlighted]`
-`[FILL: Screenshot — packet 53 details, Transmission Control Protocol expanded]`
+![Figure 8 — Packet 53 (SYN): src port 16414 → dst port 5000, Seq 282152160, options MSS=65495, WS=256, SACK_PERM](screenshots/fig08-exp1-syn-details.png){width=80%}
 
 | Pkt | Source → Destination | Flags | Seq (raw) | Ack (raw) | Win | Notes |
 |---|---|---|---|---|---|---|
@@ -458,8 +484,13 @@ node tcp-chat/bench.js --label exp2-loss10 --pings 500 --messages 2000 --pause 1
 | Burst: messages echoed back, in order | 300 / 300 | **2000 / 2000** |
 | Burst time (s) / msg/s | 0.043 / 6974 | 0.242 / 8252 |
 
-`[FILL: Screenshot — exp2-loss.pcapng with filter tcp.analysis.retransmission || tcp.analysis.duplicate_ack]`
-`[FILL: optional — Statistics → Expert Information: number of retransmissions / dup ACKs]`
+![Figure 9 — clumsy running: Drop 10% on loopback traffic to/from port 5000](screenshots/fig09-exp2-clumsy-drop10.png){width=80%}
+
+![Figure 10 — bench.js under 10% loss: avg RTT 166 ms, p95 861 ms, max 8309 ms; all 500 pings and 2000 messages delivered](screenshots/fig10-exp2-bench-loss10.png){width=70%}
+
+![Figure 11 — Previous segment not captured, Dup ACK #2–#6, Fast Retransmission and RTO Retransmission (packets 2608–2626)](screenshots/fig11-exp2-dupack-fast-retransmission.png){width=100%}
+
+![Figure 12 — Filter tcp.analysis.retransmission || tcp.analysis.duplicate_ack: retransmissions in both directions; packet 125 is the retransmitted ping #5](screenshots/fig12-exp2-retransmission-filter.png){width=100%}
 
 **What the capture shows** (around packets 2606–2626):
 
@@ -491,8 +522,11 @@ which is why all 2000 messages were counted.
 `tcp.port == 5000`. Captures: `exp1-handshake.pcapng` (client-initiated graceful close) and
 `exp3-termination.pcapng` (server-initiated graceful close, then an abrupt client crash).
 
-`[FILL: Screenshot A — exp3 packet list showing packets 178–183 (FIN) and 320 (RST)]`
-`[FILL: Screenshot B — server terminal log for both cases]`
+![Figure 13 — exp3 capture: keep-alive probes every 30 s, server-initiated FIN close (178–183), new connection (283–289) and RST from /crash (320, red)](screenshots/fig13-exp3-fin-and-rst.png){width=100%}
+
+![Figure 14 — Client terminals: “normal” receives server_shutdown + FIN; “crasher” disconnects with /crash](screenshots/fig14-exp3-client-terminals.png){width=75%}
+
+![Figure 15 — Server log: peer_fin_received for “normal”; socket_error ECONNRESET → connection_closed reason=connection_reset for “crasher”](screenshots/fig15-exp3-server-log.png){width=75%}
 
 **Case 1: graceful close started by the client (`/quit`), from `exp1-handshake.pcapng`**
 
@@ -581,7 +615,11 @@ quickly by fast retransmit (Experiment 2 capture), and (iii) the bursts differ i
 2000), so per-run start-up costs weigh differently. On a real long-RTT path, loss would also
 shrink the congestion window and reduce throughput. Loopback can't show that effect.
 
-**Receive window (flow control):** `[FILL: Screenshot — exp4-perf.pcapng with "Calculated window size" column]`
+**Receive window (flow control):**
+
+![Figure 16 — exp4-perf.pcapng: client (2310) ACKs during the 500-message burst, Win values shrinking, then FIN close](screenshots/fig16-exp4-burst-acks.png){width=100%}
+
+![Figure 17 — Packet 1400: raw window bytes 0x20B3 = 8371, × scale 256 = Win 2,142,976 bytes](screenshots/fig17-exp4-window-packet1400.png){width=75%}
 
 - In the SYN the endpoints negotiated **window scale = 256** (Experiment 1). The 16-bit window field
   is therefore multiplied by 256.
@@ -623,7 +661,10 @@ node tcp-chat/compare/sender.js --proto tcp --port 6002 --count 100 --label loss
 node tcp-chat/compare/summarize.js
 ```
 
-**Raw results**
+**Raw results** (Figure 18 shows the summarize.js output):
+
+![Figure 18 — Output of compare/summarize.js — TCP vs UDP, baseline and 10% loss; plus bench results](screenshots/fig18-tcp-vs-udp-results.png){width=100%}
+
 
 | Condition | Protocol | Sent | Received (unique) | Loss % | Missing seq numbers | Duplicates | Out of order | RTT avg ms | RTT p95 ms | RTT max ms |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -747,7 +788,10 @@ was configured on `[FILL: date]`. Resources will be deleted after grading.
   show transport-layer handling, and adding a dedicated TCP layer without breaking the existing app.
 - Framing edge cases: a multi-byte UTF-8 character split across reads corrupted text until I used `StringDecoder`.
 - Telling the three disconnect cases apart (FIN, RST, silent) and making cleanup run in exactly one place.
-- `[FILL: anything that went wrong for you during deployment or experiments, e.g. the netem kernel module missing on the GCP image]`
+- **Packet loss on Windows:** Linux `tc netem` isn't available on Windows, so I used clumsy. With loss switched on *before* connecting, every connection attempt failed with `ETIMEDOUT`: a lost SYN on Windows loopback was not retried successfully. I added a `--pause` option so loss is switched on after the handshake.
+- **clumsy Lag:** the 100 ms delay function had no measurable effect on loopback (RTT stayed ~1.7 ms), so Experiment 4 uses loss as its second condition instead.
+- **`EADDRINUSE`:** I started the server twice. The first instance still held port 5000, which showed that only one process can listen on an IP:port.
+- **Cloud account verification:** card verification failed for the cloud provider sign-up (see §8).
 
 **Limitations**
 
@@ -801,8 +845,35 @@ node tcp-chat/compare/summarize.js
 ss -tin 'sport = :5000'
 ```
 
-`[FILL: paste the exact command lines you ran, with timestamps if possible]`
+Commands actually run on my laptop (26 Nov 2026):
+
+```
+npm run tcp:test
+npm run tcp:server
+node tcp-chat/client.js --name ola          # and --name bob, normal, crasher
+node tcp-chat/bench.js --label exp2-noloss --pings 100 --messages 300
+node tcp-chat/bench.js --label exp2-loss10 --pings 500 --messages 2000 --pause 15
+node tcp-chat/bench.js --label exp4-delay100 --pings 50 --messages 500 --pause 15
+node tcp-chat/compare/receiver.js --proto udp --port 6001 --label baseline|loss10
+node tcp-chat/compare/receiver.js --proto tcp --port 6002 --label baseline|loss10
+node tcp-chat/compare/sender.js --proto udp --port 6001 --count 100 --label baseline|loss10 [--pause 10]
+node tcp-chat/compare/sender.js --proto tcp --port 6002 --count 100 --label baseline|loss10 [--pause 10]
+node tcp-chat/compare/summarize.js
+```
+
+Wireshark display filters used: `tcp.port == 5000`, `tcp.analysis.retransmission || tcp.analysis.duplicate_ack`.
 
 # Appendix B — Screenshots
 
-`[FILL: any additional screenshots that do not fit above]`
+| Figure | File | Shows |
+|---|---|---|
+| 1 | diagrams/app-architecture.png | Application architecture |
+| 2 | diagrams/cloud-architecture.png | Cloud deployment architecture |
+| 3–6 | screenshots/fig03–06 | Local multi-user chat, ping, quit, reconnect, crash |
+| 7–8 | screenshots/fig07–08 | Experiment 1: three-way handshake |
+| 9–12 | screenshots/fig09–12 | Experiment 2: loss and retransmission |
+| 13–15 | screenshots/fig13–15 | Experiment 3: FIN vs RST, server cleanup |
+| 16–17 | screenshots/fig16–17 | Experiment 4: receive window |
+| 18 | screenshots/fig18 | TCP vs UDP comparison table |
+
+Packet captures submitted: `exp1-handshake.pcapng`, `exp2-loss.pcapng`, `exp3-crash.pcapng`, `exp4-perf.pcapng`.
