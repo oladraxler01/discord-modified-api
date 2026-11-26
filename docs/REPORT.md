@@ -1,14 +1,12 @@
 ---
 title: "Design, Implementation and Cloud Deployment of a Multi-User TCP Chat Application"
 subtitle: "Data Communication and Networking — Practical Programming Assignment (400 Level)"
-author: "[FILL: Your full name] — [FILL: Matric number]"
-date: "Department of Computer Science, Veritas University Abuja — [FILL: submission date]"
+author: "Ogunkuade Olasunkanmi — VUG/CSC/24/12403"
+date: "Department of Computer Science, Veritas University Abuja — 28 November 2026"
 ---
 
-> **How to use this draft:** every `[FILL: …]` marks something only you can supply
-> (your real numbers, IPs, screenshots). Replace them all, then read every section aloud
-> once. You must be able to explain each sentence during the practical defence.
-> Delete this box before submitting.
+> **Before submitting:** read every section aloud once. You must be able to explain each
+> sentence during the practical defence. Delete this box before submitting.
 
 # 1. Introduction and Objectives
 
@@ -20,7 +18,8 @@ transport-layer behaviour: my own server never accepts or manages a socket.
 For this assignment I added a **VEIL TCP Chat** module. Its core messaging uses raw TCP
 sockets created with Node.js's built-in `net` module. The server accepts many concurrent
 connections, frames messages itself, validates input, and handles orderly (FIN) and abrupt
-(RST) disconnections. It is deployed on a Google Cloud Compute Engine virtual machine.
+(RST) disconnections. It is deployed publicly on Render. A WebSocket gateway carries browser and
+CLI users over TLS to the same raw TCP server, which runs inside the container.
 
 **Objectives**
 
@@ -60,7 +59,7 @@ connections, frames messages itself, validates input, and handles orderly (FIN) 
 
 | Item | Value |
 |---|---|
-| Server OS | Ubuntu 24.04 LTS on GCP e2-micro (2 shared vCPU, 1 GB RAM) |
+| Server | Local: Windows laptop. Cloud: Render free web service (Linux container), https://veil-tcp-chat.onrender.com |
 | Runtime | Node.js v24.12.0 (laptop) |
 | Client machines | Windows laptop (server and clients run as separate processes), PowerShell terminals in VS Code |
 | Tools | Wireshark 4.6.10 with Npcap (loopback capture), clumsy 0.3 (packet loss/delay on Windows) |
@@ -301,8 +300,10 @@ client, identified by the 4-tuple, for example
 `(127.0.0.1, 16414) ↔ (127.0.0.1, 5000)` in Experiment 1. In my local tests three clients were connected to the same server port at once (Figures 3–6: ports 5911, 5938 and 6012). A TCP connection is
 demultiplexed by the full 4-tuple, so ten clients can all talk to port 5000 at once. A UDP
 socket is demultiplexed by destination port only. The `welcome` message reports both endpoints
-back to the client, so the 4-tuple can be read live during the demonstration. On GCP the server
-sees its internal address (10.128.x.x): the VM's external IP is translated by Google's 1:1 NAT.
+back to the client, so the 4-tuple can be read live during the demonstration. On Render the
+chat server sees `127.0.0.1:<ephemeral> → 127.0.0.1:5000` for every user, because each user's TCP
+connection is opened by the gateway inside the same container. The user's public IP is visible
+only at the gateway (from the `X-Forwarded-For` header) and is logged in `gateway_open`.
 
 ## 5.7 Question 7 — What happens when a client disconnects while using TCP?
 
@@ -709,76 +710,123 @@ node tcp-chat/compare/summarize.js
 
 ![Figure 2 — Cloud deployment architecture](diagrams/cloud-architecture.png){width=100%}
 
-## 8.1 Services selected and why
+## 8.1 Provider choice and services
+
+My first plan was a Google Cloud Compute Engine VM (e2-micro, Always Free). This would have
+exposed raw TCP port 5000 directly. Account activation failed: Google Cloud requires card
+verification, and both my virtual card and a second card were rejected (Figure 19 shows the
+project with no billing account, so Compute Engine could not be enabled). With the lecturer's
+permission to use **Render**, which I already use for the VEIL web API and which needs no card for
+its free tier, I deployed there. The complete GCP plan is kept in `tcp-chat/deploy/DEPLOY.md`.
+
+![Figure 19 — Google Cloud billing account management: no billing account could be created, so Compute Engine could not be enabled](screenshots/fig19-gcp-no-billing-account.png){width=60%}
 
 | Service | Why |
 |---|---|
-| **Google Compute Engine VM (e2-micro, us-central1)** | A raw TCP service needs a host with a public IP and full control of arbitrary ports. PaaS options (Cloud Run, App Engine, Render, Vercel) only route HTTP(S) and wouldn't carry port 5000. Root access is also needed for tcpdump and tc. e2-micro is in the Always Free tier. |
-| **VPC firewall rules** | A stateful network-level filter in front of the VM. It allows exactly the ports needed. |
-| **Ephemeral external IP** | Free while attached to a running VM. A reserved static IP costs money when idle. |
-| **systemd** | Starts the server on boot, restarts it on crash, and sends SIGTERM for a graceful stop. |
-| **Cloud Billing budget** | Spending alert in case of an accidental charge. |
+| **Render Web Service (Free instance)** | No card needed, $0. Builds directly from my GitHub branch and redeploys on every push. Gives a managed HTTPS domain. |
+| **Render edge proxy** | The only public entry point. It publishes **TCP 443** (HTTPS/WSS) with a managed TLS certificate, plus 80 (redirect). |
+| **`tcp-chat/gateway.js`** | Render can't publish an arbitrary raw TCP port, so the gateway accepts WebSocket connections on `$PORT` and, **for each user, opens its own raw TCP socket** to the chat server on `127.0.0.1:5000` in the same container. |
+| **Render Logs / Health check** | stdout of both components (`gateway_open`, `connection_open`, `connection_closed`, …). `/health` is used by the platform to decide if the service is up. |
 
-**Public endpoint:** host `[FILL: EXTERNAL-IP]`, port **5000/TCP**. This is a raw TCP
-service, not an HTTP URL. Connect with:
+The browser is allowed to use WebSockets (§6 of the assignment) because **WebSockets run over
+TCP**. A WebSocket starts as an HTTP/1.1 `Upgrade` request on an existing TCP connection (here
+TLS over TCP 443). After the `101 Switching Protocols` response, the same TCP connection carries
+WebSocket frames in both directions. WebSocket has its **own message framing** (each frame
+carries a length), so the gateway converts each WebSocket message into exactly one
+newline-terminated NDJSON frame on the raw TCP socket, and decodes TCP frames back into
+WebSocket messages using the same `FrameDecoder`. The TCP server code, validation and FIN/RST
+handling are identical to local testing. Every user is still one TCP connection to `server.js`.
 
-```bash
-node tcp-chat/client.js --host [FILL: EXTERNAL-IP] --port 5000 --name <yourname>
-```
+**Public access:**
 
-## 8.2 Provisioning and deployment steps
+- Web: **https://veil-tcp-chat.onrender.com**
+- CLI:
 
-Summary (full commands in `tcp-chat/deploy/DEPLOY.md`):
+  ```bash
+  node tcp-chat/client.js --url wss://veil-tcp-chat.onrender.com/ws --name <yourname>
+  ```
 
-1. Create a GCP project, enable billing and Compute Engine, and set a $1 budget alert.
-2. Create the VM: `veil-tcp`, e2-micro, us-central1-a, Ubuntu 24.04, 10 GB standard disk, network tag `veil-chat`.
-3. Firewall: allow `tcp:5000` from `0.0.0.0/0`, and `tcp:22` from `[FILL: your IP]/32` only. Delete `default-allow-ssh`.
-4. SSH in, install Node.js 22 and git, create the unprivileged user `veil`, and clone the repository.
-5. Install `veil-tcp-chat.service`, then run `systemctl enable --now veil-tcp-chat`.
-6. Verify with `ss -ltnp 'sport = :5000'` and connect two clients from different networks.
+- Raw TCP from the Internet is **not** offered on Render (port 5000 is bound to 127.0.0.1). For raw-TCP
+  tests, run `npm run tcp:server` locally and connect with `--host/--port` (all four experiments did this).
 
-| Operation | Command |
+## 8.2 Provisioning, deployment and operation
+
+1. Render dashboard → **New → Web Service** → repository `discord-modified-api`.
+2. Branch `claude/jolly-davinci-db5797`, Runtime Node, Build `npm install`, Start
+   `node tcp-chat/gateway.js`, Instance **Free**, Health check `/health`. No environment
+   variables: Render injects `PORT`, and the chat needs no secrets.
+3. **Create Web Service.** The first deploy took 38.4 s and showed *Deploy succeeded · Live*
+   (26 Nov 2026, 14:00 GMT+1).
+
+| Operation | How |
 |---|---|
-| Start / stop / restart | `sudo systemctl start` / `stop` / `restart veil-tcp-chat` |
-| Logs | `journalctl -u veil-tcp-chat -f`, `tcp-chat/logs/server.log` |
-| Update | `git pull`, then `sudo systemctl restart veil-tcp-chat` |
-| Change port | `systemctl edit` → `Environment=TCP_PORT=6000`, restart, and add a matching firewall rule |
-| Cleanup | Delete the VM and the firewall rules, then check that billing shows $0 |
+| Start / deploy | Automatic on every push to the branch, or **Manual Deploy** |
+| Restart | **Manual Deploy → Restart service**. Render sends SIGTERM, and `gateway.js` closes all WebSockets (code 1001), ends every TCP socket (FIN) and exits |
+| Logs | Service → **Logs** |
+| Shutdown | **Settings → Suspend Web Service** |
+| Safe cleanup | **Settings → Delete Web Service** (removes the build, URL and logs; nothing else is billed) |
+| Local run of the same build | `npm run tcp:gateway`, then open http://localhost:8080 |
 
-**Evidence of two users:** `[FILL: Screenshot — two terminals on different networks
-exchanging messages through EXTERNAL-IP:5000]` `[FILL: Screenshot — journalctl showing both
-connection_open lines with different peer IPs]`
+Full guide: `tcp-chat/deploy/RENDER.md`.
 
-## 8.3 Security
+## 8.3 Evidence: two users on different networks
 
-- **Exposure:** only TCP 5000 is open to the Internet. SSH (22) is restricted to my IP and uses
-  key-based login. Everything else is blocked by the VPC's implied deny-ingress rule.
-  `[FILL: screenshot of firewall rules page]`
-- **Least privilege:** the server runs as the unprivileged user `veil` with `NoNewPrivileges`.
-  Port 5000 is above 1024, so no root is needed.
-- **Secrets:** the TCP module needs no secrets. Its configuration (`TCP_PORT`, `TCP_HOST`) is set
-  through environment variables in the systemd unit. The VEIL web API reads MongoDB, Pusher,
-  Firebase and LiveKit credentials from environment variables on Render. `.env` files are
-  git-ignored and a `.env.example` documents the names. Credentials that appeared in early Git
-  history have been `[FILL: rotated]`.
-- **Input hardening:** size limits (16 KiB frame, 1000-char text), validation, an error budget per connection and a crash-proof handler.
-- **TLS:** the TCP chat is **not** encrypted. This was deliberate, so that framing and
-  handshakes are visible in packet captures for this assignment. The limitation is that anyone
-  on the network path could read or change messages. For production I would wrap the socket in
-  TLS (`tls.createServer` with a certificate, or a TLS-terminating proxy) and use TLS 1.3.
-  The VEIL web application is already served over HTTPS/WSS.
+On 26 Nov 2026, user **ola** (laptop, home Wi-Fi, Chrome) and user **James** (phone on **LTE
+mobile data**) were connected to https://veil-tcp-chat.onrender.com at the same time. ola sent
+`#1 hello`, James joined, received it as history and replied `#2 How are you doing`, which ola
+received live. Both users appear in the Online list. ola's **Ping** measured **RTT 256 ms** for
+browser → Render → TCP chat server → back. That compares with about 1 ms on loopback (§7.4) and shows the
+real Internet path (Nigeria ↔ Render's data centre).
 
-## 8.4 Cost
+![Figure 20 — Phone on LTE: user James connected to veil-tcp-chat.onrender.com (TCP connection #539 via the gateway), receives ola’s message and replies](screenshots/fig20-cloud-phone-lte.jpg){width=45%}
 
-| Resource | Free-tier allowance | My usage | Cost |
-|---|---|---|---|
-| e2-micro VM (us-central1) | 1 instance-month | 1 instance | $0 |
-| Standard persistent disk | 30 GB-month | 10 GB | $0 |
-| Network egress | 1 GB/month (excluding China and Australia) | < `[FILL]` MB | $0 |
-| Ephemeral external IP (in use) | `[FILL: check the current GCP pricing page — external IPv4 may be charged]` | 1 | `[FILL]` |
+![Figure 21 — Laptop: user ola on the same deployment; James joined; RTT 256 ms; both users online](screenshots/fig21-cloud-laptop.png){width=100%}
 
-**Estimated total: `[FILL: $0.00 – about $3]` per month.** A budget of $1 with alerts at 50/90/100%
-was configured on `[FILL: date]`. Resources will be deleted after grading.
+![Figure 22 — Render logs: internal TCP connections to 127.0.0.1:5000; non-JSON probes rejected as malformed without crashing; FIN and RST closes logged](screenshots/fig22-render-logs.png){width=100%}
+
+**Unexpected evidence (Figure 22):** the Render logs show many short connections to
+`127.0.0.1:5000` that send non-JSON data. These come from Render's own internal port detection
+probing the listening ports inside the container, which is also why the connection numbers
+reached #469 and #539. My server rejected every probe with
+`client_error code=malformed "Invalid JSON."`, then logged `peer_fin_received` (orderly close) or
+`socket_error ECONNRESET` (reset) and cleaned up with `total` back to 0. This is a real-world test
+of malformed input and abrupt termination: the server never crashed.
+
+## 8.4 Security
+
+- **Exposed ports:** only TCP 443 (HTTPS/WSS) and 80 (redirect) are published by Render's edge.
+  The raw TCP chat port 5000 is bound to **127.0.0.1**, so it isn't reachable from the Internet.
+  There is no SSH and no admin port. Administration is only through the Render dashboard
+  (HTTPS, account login). There are no firewall rules to configure, because Render's edge acts
+  as the network entry point and publishes nothing else.
+- **TLS:** yes, for the public hop. Browsers and the CLI use `https://`/`wss://` with Render's
+  managed certificate. **Limitation:** TLS is terminated at Render's edge. The edge →
+  container hop is inside Render's network, and the gateway → chat-server hop is plaintext on
+  loopback. The raw TCP mode used for the experiments is plaintext on purpose, so payloads
+  are visible in Wireshark.
+- **Secrets:** the chat needs none. Configuration (`PORT`, `TCP_PORT`) comes from environment
+  variables. The VEIL web API's MongoDB, Pusher, Firebase and LiveKit credentials stay in its own
+  Render service's environment settings. `.env` files are git-ignored and `.env.example` lists
+  the names only. Credentials that appeared in early Git history of the VEIL backend should be
+  rotated (noted in the README).
+- **Input hardening:** the WebSocket `maxPayload` is 16 KiB, plus the TCP-side limits (16 KiB frame,
+  1000-char text), validation, a per-connection error budget, and dead-WebSocket detection (ping
+  every 25 s).
+- **No user authentication** on the chat: anyone with the URL can pick an unused name (see Limitations).
+
+## 8.5 Cost
+
+| Resource | Plan | Cost |
+|---|---|---|
+| Render Web Service `veil-tcp-chat` | Free instance (512 MB RAM, shared CPU); free instance-hours per workspace each month | $0 |
+| Bandwidth | Within the free allowance (chat frames are a few hundred bytes) | $0 |
+| TLS certificate, domain `*.onrender.com` | Included | $0 |
+
+**Estimated cost: $0.00 per month.** No payment method is attached, so the service can't
+create charges. It is suspended or stopped instead. The free tier spins the service down after
+about 15 minutes without traffic, and the next visit takes up to about 50 s while it wakes. I open the
+URL a minute before demonstrations. The abandoned GCP plan was also $0 within Always Free
+(`DEPLOY.md`), but could not be activated without card verification.
 
 # 9. Challenges and Limitations
 
@@ -801,8 +849,8 @@ was configured on `[FILL: date]`. Resources will be deleted after grading.
 3. **No end-to-end acknowledgements:** if a connection fails, a client can't know which of its last messages were broadcast (§5.9).
 4. **The client doesn't reconnect automatically.** Reconnection is manual (run it again and rejoin).
 5. **Experiments use emulated loss and delay** on loopback, and a small sample size (§7.5).
-6. **Single region and VM.** There is no load balancer or redundancy. If the VM goes down, the service is unavailable.
-7. The browser UI isn't connected to the TCP chat. The demonstration client is a terminal client.
+6. **Single free instance on Render.** There is no redundancy. It sleeps when idle, state is lost on restart, and raw TCP is only reachable inside the container, so packet captures were made locally rather than on the cloud host.
+7. **Extra hop in the cloud path:** browser users reach the TCP server through the WebSocket gateway, so the cloud RTT includes TLS, the Render proxy and the gateway.
 
 # 10. Conclusion
 
@@ -813,8 +861,8 @@ RST, timeouts) are detected and cleaned up reliably. The packet captures confirm
 three-way handshake, retransmission under loss, and the difference between graceful and abrupt
 termination. The UDP comparison showed TCP trading latency for reliability and ordering, which
 suits chat text, while UDP fits real-time, replaceable data such as voice, which VEIL already
-carries over WebRTC. The system runs on a free-tier Google Cloud VM with only the required ports
-exposed.
+carries over WebRTC. The system is deployed at no cost on Render. Only HTTPS/WSS (443) is public, and a
+WebSocket gateway gives every browser or CLI user their own TCP connection to the chat server.
 
 # 11. References
 
@@ -826,7 +874,8 @@ exposed.
 6. J. F. Kurose, K. W. Ross, *Computer Networking: A Top-Down Approach*, 8th ed., Pearson, 2021, ch. 3.
 7. Node.js documentation, "net — TCP" and "dgram — UDP", https://nodejs.org/api/
 8. Linux man page `tc-netem(8)`; Wireshark User's Guide, https://www.wireshark.org/docs/
-9. Google Cloud, "Free cloud features and trial offer", https://cloud.google.com/free/docs/free-cloud-features
+9. Render, "Deploy for Free" and "Web Services" documentation, https://render.com/docs/free
+10. Google Cloud, "Free cloud features and trial offer", https://cloud.google.com/free/docs/free-cloud-features
 
 # Appendix A — Key commands
 
@@ -875,5 +924,7 @@ Wireshark display filters used: `tcp.port == 5000`, `tcp.analysis.retransmission
 | 13–15 | screenshots/fig13–15 | Experiment 3: FIN vs RST, server cleanup |
 | 16–17 | screenshots/fig16–17 | Experiment 4: receive window |
 | 18 | screenshots/fig18 | TCP vs UDP comparison table |
+| 19 | screenshots/fig19 | GCP project without a billing account (card verification failed) |
+| 20–22 | screenshots/fig20–22 | Live cloud chat: phone on LTE, laptop, Render logs |
 
 Packet captures submitted: `exp1-handshake.pcapng`, `exp2-loss.pcapng`, `exp3-crash.pcapng`, `exp4-perf.pcapng`.

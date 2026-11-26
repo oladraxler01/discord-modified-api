@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" font-family="Segoe UI, Helvetica, Arial, sans-serif">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
@@ -7,103 +7,111 @@
       <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
     </marker>
   </defs>
-  <rect width="1200" height="720" fill="#fff"/>
-  <text x="600" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">Figure 2 — Cloud deployment architecture (Google Cloud, Always Free tier)</text>
-  <text x="600" y="58" text-anchor="middle" font-size="14" fill="#475569">Replace &lt;EXTERNAL-IP&gt; with your VM's IP. Only TCP 5000 is public; SSH 22 is restricted to the administrator's IP.</text>
+  <rect width="1200" height="700" fill="#fff"/>
+  <text x="600" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">Figure 2 — Cloud deployment architecture (Render, free web service)</text>
+  <text x="600" y="58" text-anchor="middle" font-size="14" fill="#475569">Public entry: https://veil-tcp-chat.onrender.com (TCP 443, TLS). The raw TCP chat port 5000 is bound to 127.0.0.1 inside the container only.</text>
 
-  <!-- Users -->
+  <!-- clients -->
   <g font-size="13">
-    <rect x="30" y="110" width="210" height="85" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
-    <text x="135" y="137" text-anchor="middle" font-weight="700">User A laptop</text>
-    <text x="135" y="157" text-anchor="middle">node client.js --host</text>
-    <text x="135" y="175" text-anchor="middle">&lt;EXTERNAL-IP&gt; --port 5000</text>
-    <rect x="30" y="225" width="210" height="85" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
-    <text x="135" y="252" text-anchor="middle" font-weight="700">User B laptop / phone</text>
-    <text x="135" y="272" text-anchor="middle">node client.js (same cmd)</text>
-    <text x="135" y="290" text-anchor="middle">different network</text>
-    <rect x="30" y="360" width="210" height="85" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
-    <text x="135" y="387" text-anchor="middle" font-weight="700">Administrator</text>
-    <text x="135" y="407" text-anchor="middle">SSH (key-based) :22</text>
-    <text x="135" y="425" text-anchor="middle">scp .pcap → Wireshark</text>
-    <rect x="30" y="490" width="210" height="70" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2" stroke-dasharray="5 4"/>
-    <text x="135" y="518" text-anchor="middle" font-weight="700" fill="#991b1b">Anyone else</text>
-    <text x="135" y="538" text-anchor="middle" fill="#991b1b">tries :22, :8080, …</text>
+    <rect x="30" y="100" width="220" height="90" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+    <text x="140" y="126" text-anchor="middle" font-weight="700">User A — laptop (Wi-Fi)</text>
+    <text x="140" y="146" text-anchor="middle">Chrome: web chat page</text>
+    <text x="140" y="164" text-anchor="middle">or client.js --url wss://…/ws</text>
+    <rect x="30" y="215" width="220" height="90" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+    <text x="140" y="241" text-anchor="middle" font-weight="700">User B — phone (LTE)</text>
+    <text x="140" y="261" text-anchor="middle">mobile browser</text>
+    <text x="140" y="279" text-anchor="middle">different network</text>
+    <rect x="30" y="330" width="220" height="80" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+    <text x="140" y="356" text-anchor="middle" font-weight="700">Administrator</text>
+    <text x="140" y="376" text-anchor="middle">Render dashboard (HTTPS)</text>
+    <text x="140" y="394" text-anchor="middle">deploy · logs · restart</text>
+    <rect x="30" y="440" width="220" height="70" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="140" y="468" text-anchor="middle" font-weight="700" fill="#991b1b">Anyone trying :5000 / :22</text>
+    <text x="140" y="488" text-anchor="middle" fill="#991b1b">not exposed by Render</text>
   </g>
 
-  <!-- Home NAT -->
-  <rect x="270" y="110" width="110" height="335" rx="10" fill="#f8fafc" stroke="#94a3b8"/>
-  <text x="325" y="250" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">Home /</text>
-  <text x="325" y="268" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">mobile</text>
-  <text x="325" y="286" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">router</text>
-  <text x="325" y="306" text-anchor="middle" font-size="11" fill="#475569">(NAT: private</text>
-  <text x="325" y="320" text-anchor="middle" font-size="11" fill="#475569">→ public IP)</text>
+  <ellipse cx="350" cy="255" rx="62" ry="120" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+  <text x="350" y="250" text-anchor="middle" font-size="15" font-weight="700" fill="#334155">Internet</text>
+  <text x="350" y="270" text-anchor="middle" font-size="12" fill="#475569">IP routing</text>
 
-  <!-- Internet -->
-  <ellipse cx="480" cy="280" rx="80" ry="140" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
-  <text x="480" y="275" text-anchor="middle" font-size="16" font-weight="700" fill="#334155">Internet</text>
-  <text x="480" y="295" text-anchor="middle" font-size="12" fill="#475569">IP routing</text>
+  <!-- Render -->
+  <rect x="440" y="85" width="735" height="560" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="808" y="112" text-anchor="middle" font-size="16" font-weight="700" fill="#4c1d95">Render platform — Web Service "veil-tcp-chat" (Free instance)</text>
 
+  <rect x="460" y="130" width="230" height="160" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2"/>
+  <text x="575" y="155" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">Render edge proxy</text>
+  <g font-size="12" text-anchor="middle" fill="#0f172a">
+    <text x="575" y="178">network entry point</text>
+    <text x="575" y="198">only TCP 443 (HTTPS/WSS)</text>
+    <text x="575" y="216">+ 80 → redirect to 443</text>
+    <text x="575" y="236">TLS terminated here</text>
+    <text x="575" y="256">(managed certificate)</text>
+    <text x="575" y="276">adds X-Forwarded-For</text>
+  </g>
+
+  <rect x="720" y="130" width="435" height="425" rx="10" fill="#ecfdf5" stroke="#16a34a" stroke-width="2"/>
+  <text x="937" y="155" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">Container · node tcp-chat/gateway.js (one process)</text>
+
+  <rect x="740" y="172" width="395" height="110" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="937" y="195" text-anchor="middle" font-size="13" font-weight="700">HTTP + WebSocket gateway — 0.0.0.0:$PORT</text>
+  <g font-size="12" text-anchor="middle">
+    <text x="937" y="215">GET /  → web chat page · GET /health → "ok"</text>
+    <text x="937" y="233">/ws → one WebSocket per user (ws library)</text>
+    <text x="937" y="251">opens ONE raw TCP socket per WebSocket user</text>
+    <text x="937" y="269">WS message ⇄ NDJSON frame ("…\n") · ping every 25 s</text>
+  </g>
+
+  <rect x="740" y="330" width="395" height="125" rx="8" fill="#fff" stroke="#16a34a"/>
+  <text x="937" y="353" text-anchor="middle" font-size="13" font-weight="700">TCP chat server (server.js) — 127.0.0.1:5000</text>
+  <g font-size="12" text-anchor="middle">
+    <text x="937" y="373">net.createServer · FrameDecoder · validation</text>
+    <text x="937" y="391">clients Map · broadcast · DM · history</text>
+    <text x="937" y="409">FIN / RST / keep-alive / idle-timeout handling</text>
+    <text x="937" y="427">logs → stdout → Render Logs</text>
+    <text x="937" y="445">internal only: not reachable from the Internet</text>
+  </g>
+  <path d="M900 282 V 328" stroke="#334155" stroke-width="2.2" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path d="M975 282 V 328" stroke="#334155" stroke-width="2.2" marker-end="url(#a)" marker-start="url(#a)"/>
+  <text x="1060" y="310" text-anchor="middle" font-size="11" font-weight="700" fill="#334155">raw TCP, loopback</text>
+
+  <rect x="740" y="470" width="395" height="70" rx="8" fill="#fff" stroke="#16a34a"/>
+  <g font-size="12" text-anchor="middle">
+    <text x="937" y="493">Config: PORT set by Render; TCP_PORT=5000 default; no secrets.</text>
+    <text x="937" y="511">Build: npm install · Start: node tcp-chat/gateway.js</text>
+    <text x="937" y="529">Branch: claude/jolly-davinci-db5797 (auto-deploy on push)</text>
+  </g>
+
+  <rect x="460" y="310" width="230" height="110" rx="10" fill="#fff" stroke="#7c3aed"/>
+  <text x="575" y="335" text-anchor="middle" font-size="13" font-weight="700" fill="#5b21b6">Platform ops</text>
+  <g font-size="12" text-anchor="middle" fill="#5b21b6">
+    <text x="575" y="356">health check /health</text>
+    <text x="575" y="374">SIGTERM on restart/deploy</text>
+    <text x="575" y="392">sleeps after ~15 min idle</text>
+    <text x="575" y="410">port-scan probes (logged)</text>
+  </g>
+
+  <rect x="460" y="570" width="695" height="55" rx="10" fill="#fff" stroke="#7c3aed"/>
+  <text x="808" y="593" text-anchor="middle" font-size="13" font-weight="700" fill="#5b21b6">Cost: Render Free web service — no card required — $0.00 / month</text>
+  <text x="808" y="612" text-anchor="middle" font-size="12" fill="#5b21b6">750 free instance-hours per workspace per month; cleanup = Suspend or Delete Web Service</text>
+
+  <!-- arrows on top -->
   <g stroke="#334155" stroke-width="2.2" fill="none">
-    <path d="M240 152 H 268" marker-end="url(#a)"/>
-    <path d="M240 267 H 268" marker-end="url(#a)"/>
-    <path d="M240 402 H 268" marker-end="url(#a)"/>
-    <path d="M380 280 H 398" marker-end="url(#a)"/>
-      </g>
-  <text x="590" y="170" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">TCP :5000</text>
-  <text x="600" y="330" text-anchor="middle" font-size="12" font-weight="700" fill="#a16207">TCP :22</text>
-  <text x="430" y="565" text-anchor="middle" font-size="12" fill="#991b1b">dropped by firewall</text>
-
-  <!-- GCP -->
-  <rect x="630" y="90" width="545" height="590" rx="14" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
-  <text x="900" y="116" text-anchor="middle" font-size="16" font-weight="700" fill="#075985">Google Cloud project · region us-central1 · VPC "default"</text>
-
-  <rect x="650" y="135" width="505" height="120" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2"/>
-  <text x="900" y="158" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">VPC firewall (network entry point, stateful)</text>
-  <g font-size="12" fill="#0f172a">
-    <text x="670" y="182">✔ veil-chat-tcp-5000 : INGRESS allow tcp:5000 from 0.0.0.0/0 → tag veil-chat</text>
-    <text x="670" y="202">✔ veil-ssh-admin     : INGRESS allow tcp:22 from &lt;ADMIN-IP&gt;/32 → tag veil-chat</text>
-    <text x="670" y="222">✖ default-allow-ssh deleted · implied deny-all for every other ingress</text>
-    <text x="670" y="242">(temporary, testing only: udp:6001 + tcp:6002 for UDP/TCP comparison)</text>
+    <path d="M250 145 C 270 150, 280 190, 292 210" marker-end="url(#a)"/>
+    <path d="M250 260 H 286" marker-end="url(#a)"/>
+    <path d="M250 370 C 275 360, 285 330, 298 310" marker-end="url(#a)" stroke="#ca8a04"/>
+    <path d="M412 230 H 458" marker-end="url(#a)" marker-start="url(#a)"/>
+    <path d="M690 210 H 738" marker-end="url(#a)" marker-start="url(#a)"/>
   </g>
+  <text x="436" y="215" text-anchor="middle" font-size="11" font-weight="700" fill="#334155">TCP 443</text>
+  <text x="436" y="250" text-anchor="middle" font-size="11" fill="#334155" font-weight="700">TLS</text>
+  <text x="714" y="200" text-anchor="middle" font-size="11" font-weight="700" fill="#334155">WS</text>
+  <path d="M250 475 C 380 500, 430 420, 458 280" stroke="#dc2626" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#r)"/>
+  <text x="330" y="525" text-anchor="middle" font-size="12" fill="#991b1b">no route: only 443 is published</text>
 
-  <rect x="650" y="275" width="505" height="50" rx="10" fill="#fff" stroke="#0284c7"/>
-  <text x="900" y="297" text-anchor="middle" font-size="13" font-weight="700">Ephemeral external IP &lt;EXTERNAL-IP&gt;  ⇄  internal IP 10.128.0.x</text>
-  <text x="900" y="315" text-anchor="middle" font-size="12" fill="#475569">1:1 NAT by Google's network — server log shows the internal IP as local address</text>
-
-  <rect x="650" y="345" width="505" height="250" rx="10" fill="#ecfdf5" stroke="#16a34a" stroke-width="2"/>
-  <text x="900" y="370" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">VM "veil-tcp" · e2-micro · Ubuntu 24.04 · 10 GB std disk</text>
-  <rect x="670" y="385" width="230" height="110" rx="8" fill="#fff" stroke="#16a34a"/>
-  <text x="785" y="408" text-anchor="middle" font-size="13" font-weight="700">systemd: veil-tcp-chat</text>
-  <text x="785" y="428" text-anchor="middle" font-size="12">user "veil" (unprivileged)</text>
-  <text x="785" y="446" text-anchor="middle" font-size="12">node tcp-chat/server.js</text>
-  <text x="785" y="464" text-anchor="middle" font-size="12">listen 0.0.0.0:5000</text>
-  <text x="785" y="482" text-anchor="middle" font-size="12">Restart=on-failure</text>
-  <rect x="915" y="385" width="220" height="110" rx="8" fill="#fff" stroke="#16a34a"/>
-  <text x="1025" y="408" text-anchor="middle" font-size="13" font-weight="700">Ops &amp; evidence</text>
-  <text x="1025" y="428" text-anchor="middle" font-size="12">journald + logs/server.log</text>
-  <text x="1025" y="446" text-anchor="middle" font-size="12">tcpdump → .pcap</text>
-  <text x="1025" y="464" text-anchor="middle" font-size="12">tc netem (loopback tests)</text>
-  <text x="1025" y="482" text-anchor="middle" font-size="12">ss -tin (cwnd, rtt, windows)</text>
-  <rect x="670" y="510" width="465" height="70" rx="8" fill="#fff" stroke="#16a34a"/>
-  <text x="900" y="533" text-anchor="middle" font-size="12">Config via env vars (TCP_PORT, TCP_HOST) in unit file; no secrets.</text>
-  <text x="900" y="551" text-anchor="middle" font-size="12">VEIL web-API secrets stay in Render env vars, never in Git.</text>
-  <text x="900" y="569" text-anchor="middle" font-size="12">sshd: key-based login (GCP OS Login / metadata keys)</text>
-
-  <path d="M900 255 V 273" stroke="#334155" stroke-width="2.2" marker-end="url(#a)"/>
-  <path d="M900 325 V 343" stroke="#334155" stroke-width="2.2" marker-end="url(#a)"/>
-
-  <rect x="650" y="610" width="505" height="55" rx="10" fill="#fff" stroke="#7c3aed"/>
-  <text x="900" y="633" text-anchor="middle" font-size="13" font-weight="700" fill="#5b21b6">Billing: budget $1 with alerts at 50 / 90 / 100 %</text>
-  <text x="900" y="652" text-anchor="middle" font-size="12" fill="#5b21b6">Always Free e2-micro + 30 GB std disk + 1 GB egress → estimated $0.00 / month</text>
-
-  <!-- TCP path legend -->
   <g font-size="12" fill="#334155">
-    <text x="30" y="620" font-weight="700">TCP connection path</text>
-    <text x="30" y="640">client socket (192.168.x.y:51234) → router NAT (public IP:port)</text>
-    <text x="30" y="658">→ Internet → firewall (tcp:5000 allowed) → external IP</text>
-    <text x="30" y="676">→ 10.128.0.x:5000 → node server.js listening socket</text>
+    <text x="30" y="590" font-weight="700">TCP connection path (one user)</text>
+    <text x="30" y="610">browser → TCP+TLS to Render edge :443 → WebSocket</text>
+    <text x="30" y="628">→ gateway.js → new TCP socket 127.0.0.1:eph → :5000</text>
+    <text x="30" y="646">→ server.js (one connection per user)</text>
   </g>
-  <path d="M556 220 C 590 200, 610 185, 648 180" marker-end="url(#a)" marker-start="url(#a)" stroke="#334155" stroke-width="2.2" fill="none"/>
-  <path d="M552 340 C 600 300, 615 230, 648 205" marker-end="url(#a)" stroke="#ca8a04" stroke-width="2.2" fill="none"/>
-  <path d="M240 525 C 450 560, 600 420, 648 235" stroke="#dc2626" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#r)"/>
 </svg>
