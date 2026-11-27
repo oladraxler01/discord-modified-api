@@ -111,6 +111,9 @@ function onMessage(message) {
         break;
       case "typing":
         break;
+      case "call":
+        if (message.signal?.kind === "offer") print(`📞 ${message.from} is calling (voice calls work in the web page)`);
+        break;
       case "dm":
         print(`[${time(message.ts)}] (DM ${message.from} -> ${message.to}) ${message.text}`);
         break;

@@ -131,6 +131,22 @@ const handleMessage = (client, msg) => {
       return undefined;
     }
 
+    case "call": {
+      // Voice-call SIGNALLING over TCP (offer / answer / ICE candidate / hangup).
+      // The voice itself never passes through this server: it flows peer-to-peer over UDP (WebRTC/RTP).
+      const target = findByName(msg.to);
+      if (!target || target === client) return sendError(client, "unknown_user", `User "${msg.to}" is not connected.`);
+      if (!msg.signal || typeof msg.signal !== "object" || Array.isArray(msg.signal)) {
+        return sendError(client, "invalid_call", "Call signal must be an object.");
+      }
+      if (JSON.stringify(msg.signal).length > 64 * 1024) return sendError(client, "invalid_call", "Call signal too large.");
+      if (msg.signal.kind !== "candidate") {
+        log("INFO", "call_signal", { from: client.username, to: target.username, kind: String(msg.signal.kind) });
+      }
+      send(target, { type: "call", from: client.username, signal: msg.signal });
+      return undefined;
+    }
+
     case "typing":
       // Short-lived hint ("ola is typing…"); a lost one would not matter (a UDP-style use case).
       for (const other of clients.values()) {

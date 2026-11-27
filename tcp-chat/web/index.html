@@ -73,6 +73,17 @@
   #recInfo { display:none; color:#fca5a5; font-size:13px; font-variant-numeric:tabular-nums; }
   @keyframes pulse { 50% { box-shadow:0 0 0 6px #ef444433; } }
 
+  .callbtn { background:#065f46; color:#d1fae5; padding:4px 8px; font-size:12px; border-radius:8px; }
+  #callPanel { display:none; margin:10px 14px 0; background:linear-gradient(135deg,#052e2b,#0f172a); border:1px solid #10b981; border-radius:14px; padding:12px 14px; }
+  #callPanel .head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  #callPanel .head b { font-size:15px; } #callState { color:#6ee7b7; font-size:13px; flex:1; }
+  #callPanel button { padding:8px 12px; font-weight:700; }
+  .accept { background:#16a34a; color:#fff; } .decline, .hang { background:#dc2626; color:#fff; } .mute { background:#334155; color:#fff; }
+  #udpStats { display:none; margin-top:10px; display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; }
+  .stat { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
+  .stat span { display:block; font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .stat b { font-size:14px; font-family:ui-monospace,Consolas,monospace; word-break:break-all; }
+  .stat.bad b { color:#f87171; }
   @media (max-width:760px) {
     aside { position:fixed; inset:0 auto 0 0; z-index:5; transform:translateX(-100%); transition:transform .2s; box-shadow:10px 0 40px #0009; }
     aside.open { transform:none; }
@@ -109,6 +120,17 @@
     <button class="iconbtn" id="menuBtn">☰</button>
     <div class="title"><b># general</b><div id="info">connecting…</div></div>
     <button class="iconbtn" id="ping" title="Measure round-trip time">⚡ Ping</button>
+  </div>
+  <div id="callPanel">
+    <div class="head">
+      <b>📞 <span id="callWith"></span></b><span id="callState"></span>
+      <button class="accept" id="acceptBtn">Accept</button>
+      <button class="decline" id="declineBtn">Decline</button>
+      <button class="mute" id="muteBtn">Mute</button>
+      <button class="hang" id="hangBtn">Hang up</button>
+    </div>
+    <div id="udpStats"></div>
+    <audio id="remoteAudio" autoplay playsinline></audio>
   </div>
   <div id="log"></div>
   <div id="typing"></div>
@@ -165,7 +187,12 @@ function renderUsers() {
     const n = document.createElement("div"); n.className = "name"; n.textContent = u;
     const tag = document.createElement("div"); tag.className = "tag"; tag.textContent = u === me ? "you" : "DM";
     d.append(avatar(u, true), n, tag);
-    if (u !== me) d.onclick = () => { setDm(u); $("side").classList.remove("open"); };
+    if (u !== me) {
+      d.onclick = () => { setDm(u); $("side").classList.remove("open"); };
+      const cb = document.createElement("button"); cb.className = "callbtn"; cb.textContent = "📞 Call"; cb.title = "Voice call (UDP)";
+      cb.onclick = (e) => { e.stopPropagation(); $("side").classList.remove("open"); startCall(u); };
+      d.append(cb);
+    }
     $("users").append(d);
   });
 }
@@ -196,8 +223,9 @@ function connect() {
       case "voice": typingUsers.delete(m.from); renderTyping(); bubble(m, "voice"); break;
       case "dm": bubble(m, "dm"); break;
       case "typing": typingUsers.set(m.from, Date.now()); renderTyping(); break;
+      case "call": onSignal(m.from, m.signal); break;
       case "joined": online.add(m.username); renderUsers(); sys(`${m.username} joined`); break;
-      case "left": online.delete(m.username); typingUsers.delete(m.username); renderUsers(); sys(`${m.username} left (${m.reason})`); if (dmTarget === m.username) setDm(null); break;
+      case "left": online.delete(m.username); typingUsers.delete(m.username); renderUsers(); sys(`${m.username} left (${m.reason})`); if (dmTarget === m.username) setDm(null); if (callPeer === m.username) endCall("other user disconnected", false); break;
       case "users": online = new Set(m.users); renderUsers(); break;
       case "pong": sys(`⚡ Round-trip time ${(performance.now() - Number(m.t)).toFixed(0)} ms (browser → Render → TCP server → back)`); break;
       case "error":
@@ -230,6 +258,110 @@ function submit() {
 }
 $("send").onclick = submit;
 $("text").onkeydown = (e) => { if (e.key === "Enter") submit(); };
+
+
+// ===================== Voice call: signalling over TCP, voice over UDP (WebRTC) =====================
+const ICE = { iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }] };
+let pc = null, callPeer = null, localStream = null, pendingOffer = null, pendingCands = [], statsTimer = null, callStart = 0, lastBytes = null, finalStats = null;
+const sig = (to, signal) => send({ type: "call", to, signal });
+function showCall(peer, state, mode) {
+  $("callPanel").style.display = "block"; $("callWith").textContent = peer; $("callState").textContent = state;
+  $("acceptBtn").style.display = $("declineBtn").style.display = mode === "incoming" ? "" : "none";
+  $("hangBtn").style.display = mode === "incoming" ? "none" : ""; $("muteBtn").style.display = mode === "active" ? "" : "none";
+}
+async function makePc() {
+  localStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  pc = new RTCPeerConnection(ICE);
+  localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+  pc.onicecandidate = (e) => { if (e.candidate) sig(callPeer, { kind: "candidate", candidate: e.candidate.toJSON() }); };
+  pc.ontrack = (e) => { $("remoteAudio").srcObject = e.streams[0]; $("remoteAudio").play().catch(() => {}); };
+  pc.onconnectionstatechange = () => {
+    const st = pc && pc.connectionState;
+    if (st === "connected") { callStart = Date.now(); showCall(callPeer, "connected · voice over UDP", "active"); sys(`📞 Call with ${callPeer} connected — audio is flowing peer-to-peer over UDP`); startStats(); }
+    if (st === "failed") endCall("connection failed (devices could not reach each other over UDP — try the same Wi-Fi/hotspot)", true);
+  };
+}
+async function flushCands() { for (const c of pendingCands.splice(0)) { try { await pc.addIceCandidate(c); } catch {} } }
+async function startCall(u) {
+  if (pc || pendingOffer) return sys("You are already in a call.", true);
+  if (!navigator.mediaDevices || !window.RTCPeerConnection) return sys("Calls are not supported in this browser.", true);
+  callPeer = u;
+  try { await makePc(); } catch { callPeer = null; return sys("Microphone permission denied.", true); }
+  const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+  sig(u, { kind: "offer", sdp: pc.localDescription.sdp });
+  showCall(u, "calling… (signalling over TCP)", "outgoing");
+}
+async function onSignal(from, s) {
+  if (!s || !s.kind) return;
+  if (s.kind === "offer") {
+    if (pc || pendingOffer) return sig(from, { kind: "busy" });
+    callPeer = from; pendingOffer = s.sdp; showCall(from, "incoming voice call", "incoming"); sys(`📞 ${from} is calling you`);
+    return;
+  }
+  if (from !== callPeer) return;
+  if (s.kind === "answer" && pc) { await pc.setRemoteDescription({ type: "answer", sdp: s.sdp }); await flushCands(); showCall(callPeer, "connecting (ICE over UDP)…", "outgoing"); }
+  else if (s.kind === "candidate") { if (pc && pc.remoteDescription) { try { await pc.addIceCandidate(s.candidate); } catch {} } else pendingCands.push(s.candidate); }
+  else if (s.kind === "hangup") endCall(`${from} hung up`, false);
+  else if (s.kind === "decline") endCall(`${from} declined`, false);
+  else if (s.kind === "busy") endCall(`${from} is busy`, false);
+}
+$("acceptBtn").onclick = async () => {
+  const offer = pendingOffer; pendingOffer = null;
+  try { await makePc(); } catch { sig(callPeer, { kind: "decline" }); return endCall("microphone permission denied", false); }
+  await pc.setRemoteDescription({ type: "offer", sdp: offer }); await flushCands();
+  const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+  sig(callPeer, { kind: "answer", sdp: pc.localDescription.sdp });
+  showCall(callPeer, "connecting (ICE over UDP)…", "active");
+};
+$("declineBtn").onclick = () => { sig(callPeer, { kind: "decline" }); endCall("declined", false); };
+$("hangBtn").onclick = () => endCall("you hung up", true);
+$("muteBtn").onclick = () => { if (!localStream) return; const t = localStream.getAudioTracks()[0]; t.enabled = !t.enabled; $("muteBtn").textContent = t.enabled ? "Mute" : "Unmute"; };
+function endCall(reason, notify) {
+  if (notify && callPeer) sig(callPeer, { kind: "hangup" });
+  clearInterval(statsTimer); statsTimer = null;
+  const peer = callPeer, dur = callStart ? Math.round((Date.now() - callStart) / 1000) : 0, f = finalStats;
+  if (pc) pc.close(); pc = null;
+  if (localStream) localStream.getTracks().forEach((t) => t.stop()); localStream = null;
+  callPeer = null; pendingOffer = null; pendingCands = []; callStart = 0; lastBytes = null; finalStats = null;
+  $("callPanel").style.display = "none"; $("udpStats").innerHTML = ""; $("muteBtn").textContent = "Mute";
+  if (peer) sys(`📞 Call with ${peer} ended (${reason})` + (dur ? ` · ${dur}s` : "") + (f ? ` · UDP: ${f.recv} packets received, ${f.lost} lost (${f.lossPct}%), jitter ${f.jitter} ms` : ""));
+}
+function startStats() {
+  clearInterval(statsTimer);
+  statsTimer = setInterval(async () => {
+    if (!pc) return;
+    const r = await pc.getStats(); const by = {}; r.forEach((x) => { by[x.id] = x; });
+    let pair, inb, out, rin, codec;
+    r.forEach((x) => {
+      if (x.type === "transport" && x.selectedCandidatePairId) pair = by[x.selectedCandidatePairId];
+      if (x.type === "inbound-rtp" && x.kind === "audio") inb = x;
+      if (x.type === "outbound-rtp" && x.kind === "audio") out = x;
+      if (x.type === "remote-inbound-rtp" && x.kind === "audio") rin = x;
+    });
+    if (!pair) r.forEach((x) => { if (x.type === "candidate-pair" && x.state === "succeeded" && x.nominated) pair = x; });
+    const lc = pair && by[pair.localCandidateId], rc = pair && by[pair.remoteCandidateId];
+    if (inb && inb.codecId) codec = by[inb.codecId];
+    const recv = inb ? inb.packetsReceived : 0, lost = inb ? Math.max(0, inb.packetsLost) : 0;
+    const lossPct = recv + lost ? ((lost / (recv + lost)) * 100).toFixed(1) : "0.0";
+    const jitter = inb && inb.jitter != null ? (inb.jitter * 1000).toFixed(1) : "–";
+    const rtt = pair && pair.currentRoundTripTime != null ? (pair.currentRoundTripTime * 1000).toFixed(0) : rin && rin.roundTripTime != null ? (rin.roundTripTime * 1000).toFixed(0) : "–";
+    const bytes = inb ? inb.bytesReceived : 0; const kbps = lastBytes != null ? (((bytes - lastBytes) * 8) / 1000).toFixed(0) : "–"; lastBytes = bytes;
+    const ep = (c) => (c ? `${c.address || c.ip || "?"}:${c.port}` : "–");
+    finalStats = { recv, lost, lossPct, jitter };
+    const cells = [
+      ["Transport", lc ? `${(lc.protocol || "udp").toUpperCase()} (${lc.candidateType})` : "UDP"],
+      ["Local IP:port", ep(lc)], ["Remote IP:port", ep(rc)],
+      ["Packets sent", out ? out.packetsSent : 0], ["Packets received", recv],
+      ["Packets lost", lost, lost > 0], ["Loss", lossPct + " %", Number(lossPct) > 1],
+      ["Jitter", jitter + " ms"], ["Round-trip", rtt + " ms"], ["Audio in", kbps + " kbps"],
+      ["Codec", codec ? codec.mimeType.replace("audio/", "") : "opus"],
+      ["Call time", Math.round((Date.now() - callStart) / 1000) + " s"],
+    ];
+    $("udpStats").innerHTML = "";
+    cells.forEach(([k, v, bad]) => { const d = document.createElement("div"); d.className = "stat" + (bad ? " bad" : ""); const a = document.createElement("span"); a.textContent = k; const b = document.createElement("b"); b.textContent = v; d.append(a, b); $("udpStats").append(d); });
+  }, 1000);
+}
+window.addEventListener("beforeunload", () => { if (callPeer) sig(callPeer, { kind: "hangup" }); });
 
 // Voice notes: record with MediaRecorder, send as ONE TCP frame (base64 data URL).
 let rec = null, chunks = [], recStart = 0, recTimer = null;
