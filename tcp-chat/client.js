@@ -106,6 +106,11 @@ function onMessage(message) {
       case "msg":
         print(`[${time(message.ts)}] #${message.seq} ${message.from}: ${message.text}`);
         break;
+      case "voice":
+        print(`[${time(message.ts)}] #${message.seq} ${message.from}: 🎤 voice note (${message.duration}s, ${Math.round(message.data.length / 1024)} KB)`);
+        break;
+      case "typing":
+        break;
       case "dm":
         print(`[${time(message.ts)}] (DM ${message.from} -> ${message.to}) ${message.text}`);
         break;

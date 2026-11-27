@@ -15,6 +15,7 @@ import {
   FrameDecoder,
   validateText,
   validateUsername,
+  validateVoice,
 } from "./protocol.js";
 
 const HOST = process.env.TCP_HOST || "0.0.0.0";
@@ -113,6 +114,29 @@ const handleMessage = (client, msg) => {
       broadcast(out); // includes sender, as delivery confirmation
       return undefined;
     }
+
+    case "voice": {
+      const invalid = validateVoice(msg);
+      if (invalid) return sendError(client, "invalid_voice", invalid);
+      const out = {
+        type: "voice",
+        seq: nextSeq++,
+        from: client.username,
+        data: msg.data,
+        duration: Math.round(Number(msg.duration) * 10) / 10,
+        ts: Date.now(),
+      };
+      log("INFO", "voice_note", { from: client.username, seq: out.seq, bytes: msg.data.length, duration: out.duration });
+      broadcast(out); // not kept in history: keeps the welcome frame small
+      return undefined;
+    }
+
+    case "typing":
+      // Short-lived hint ("ola is typing…"); a lost one would not matter (a UDP-style use case).
+      for (const other of clients.values()) {
+        if (other.username && other !== client) send(other, { type: "typing", from: client.username });
+      }
+      return undefined;
 
     case "dm": {
       const invalid = validateText(msg.text);

@@ -7,7 +7,7 @@
 import { StringDecoder } from "string_decoder";
 
 export const DELIMITER = "\n";
-export const MAX_FRAME_BYTES = 16 * 1024; // reject absurdly long lines (memory safety)
+export const MAX_FRAME_BYTES = 512 * 1024; // reject absurdly long lines (memory safety); voice notes fit inside
 
 export const encode = (message) => JSON.stringify(message) + DELIMITER;
 
@@ -67,5 +67,17 @@ export const validateText = (text) => {
   if (trimmed.length > MAX_TEXT_LENGTH) {
     return `Text must be at most ${MAX_TEXT_LENGTH} characters.`;
   }
+  return null;
+};
+
+// Voice notes travel as one NDJSON frame: base64 data URL of the recorded audio.
+export const MAX_VOICE_CHARS = 400 * 1024; // ~300 KB of audio (about 60 s of Opus)
+export const validateVoice = (msg) => {
+  if (typeof msg.data !== "string" || !/^data:audio\/[\w.+-]+(;[\w=.+-]+)*;base64,[A-Za-z0-9+/=]+$/.test(msg.data)) {
+    return "Voice data must be a base64 audio data URL.";
+  }
+  if (msg.data.length > MAX_VOICE_CHARS) return "Voice note is too long (max about 60 s).";
+  const d = Number(msg.duration);
+  if (!Number.isFinite(d) || d <= 0 || d > 120) return "Voice duration must be 0-120 seconds.";
   return null;
 };

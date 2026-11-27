@@ -39,7 +39,7 @@ const httpServer = http.createServer((req, res) => {
   return res.end("not found");
 });
 
-const wss = new WebSocketServer({ server: httpServer, path: "/ws", maxPayload: 16 * 1024 });
+const wss = new WebSocketServer({ server: httpServer, path: "/ws", maxPayload: 512 * 1024 });
 let nextGatewayId = 1;
 
 wss.on("connection", (ws, req) => {

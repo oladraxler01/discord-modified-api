@@ -2,104 +2,266 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VEIL TCP Chat</title>
 <style>
-  :root { --bg:#0f172a; --panel:#111827; --line:#1f2937; --text:#e5e7eb; --muted:#94a3b8; --accent:#8b5cf6; --me:#4c1d95; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
-  header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  header h1 { font-size:18px; margin:0 12px 0 0; }
-  header input { background:var(--panel); border:1px solid var(--line); color:var(--text); padding:8px 10px; border-radius:8px; }
-  button { background:var(--accent); color:#fff; border:0; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600; }
-  button.secondary { background:#334155; }
-  button:disabled { opacity:.4; cursor:default; }
-  #info { font-size:12px; color:var(--muted); font-family: ui-monospace, Consolas, monospace; }
-  main { flex:1; display:flex; min-height:0; }
-  #log { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:6px; }
-  aside { width:200px; border-left:1px solid var(--line); padding:12px; font-size:14px; }
-  aside h2 { font-size:13px; color:var(--muted); text-transform:uppercase; margin:0 0 8px; }
-  .msg { max-width:70%; padding:8px 12px; border-radius:12px; background:var(--panel); align-self:flex-start; }
-  .msg.me { background:var(--me); align-self:flex-end; }
-  .msg .meta { font-size:11px; color:var(--muted); margin-bottom:2px; }
-  .sys { align-self:center; font-size:12px; color:var(--muted); }
-  .err { align-self:center; font-size:12px; color:#f87171; }
-  footer { display:flex; gap:8px; padding:12px; border-top:1px solid var(--line); }
-  footer input { flex:1; background:var(--panel); border:1px solid var(--line); color:var(--text); padding:10px; border-radius:8px; }
-  @media (max-width:640px){ aside{display:none} .msg{max-width:90%} }
+  :root { --bg:#0b1020; --side:#0f172a; --panel:#141b2d; --line:#1e293b; --text:#e5e7eb; --muted:#94a3b8; --accent:#8b5cf6; --accent2:#6d28d9; --me:#5b21b6; --ok:#22c55e; --err:#f87171; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; font-family:system-ui,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); display:flex; height:100dvh; }
+  button { font:inherit; border:0; cursor:pointer; border-radius:10px; }
+  input { font:inherit; }
+
+  /* login */
+  #login { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 30% 20%, #2e1065 0, var(--bg) 55%); z-index:10; padding:20px; }
+  .card { width:100%; max-width:380px; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:28px; box-shadow:0 20px 60px #0008; }
+  .card h1 { margin:0 0 4px; font-size:26px; } .card p { margin:0 0 20px; color:var(--muted); font-size:14px; }
+  .card input { width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--text); margin-bottom:12px; outline:none; }
+  .card input:focus { border-color:var(--accent); }
+  .card button { width:100%; padding:12px; background:var(--accent); color:#fff; font-weight:700; }
+  .card small { display:block; margin-top:14px; color:var(--muted); font-size:12px; line-height:1.5; }
+  #loginErr { color:var(--err); font-size:13px; min-height:18px; margin-bottom:6px; }
+
+  /* layout */
+  aside { width:260px; background:var(--side); border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .brand { padding:18px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+  .logo { width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg,var(--accent),#ec4899); display:grid; place-items:center; font-weight:800; }
+  .brand b { display:block; } .brand span { font-size:12px; color:var(--muted); }
+  .sect { padding:14px 16px 6px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+  #users { flex:1; overflow-y:auto; padding:0 8px; }
+  .user { display:flex; align-items:center; gap:10px; padding:8px; border-radius:10px; cursor:pointer; }
+  .user:hover { background:var(--panel); }
+  .user .name { flex:1; font-size:14px; } .user .tag { font-size:11px; color:var(--muted); }
+  .me-box { border-top:1px solid var(--line); padding:12px 16px; display:flex; align-items:center; gap:10px; }
+  .me-box .name { flex:1; font-weight:600; font-size:14px; } .me-box .name small { display:block; font-weight:400; color:var(--ok); font-size:11px; }
+  .iconbtn { background:var(--panel); color:var(--text); padding:8px 10px; font-size:13px; }
+  .iconbtn:hover { background:#1e293b; }
+
+  .avatar { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; font-weight:700; font-size:14px; color:#fff; position:relative; flex:none; }
+  .avatar.on::after { content:""; position:absolute; right:-1px; bottom:-1px; width:10px; height:10px; border-radius:50%; background:var(--ok); border:2px solid var(--side); }
+
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .top { padding:12px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  .top .title { flex:1; } .top .title b { font-size:16px; } .top .title div { font-size:12px; color:var(--muted); font-family:ui-monospace,Consolas,monospace; }
+  #menuBtn { display:none; }
+  #log { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:4px; }
+  .row { display:flex; gap:10px; align-items:flex-end; max-width:75%; }
+  .row.me { align-self:flex-end; flex-direction:row-reverse; }
+  .row.cont .avatar { visibility:hidden; }
+  .bubble { background:var(--panel); border:1px solid var(--line); padding:8px 12px 6px; border-radius:16px 16px 16px 4px; min-width:80px; }
+  .row.me .bubble { background:var(--me); border-color:var(--accent2); border-radius:16px 16px 4px 16px; }
+  .bubble .who { font-size:12px; font-weight:700; margin-bottom:2px; }
+  .row.me .bubble .who, .row.cont .bubble .who { display:none; }
+  .bubble .txt { white-space:pre-wrap; word-wrap:break-word; line-height:1.4; }
+  .bubble .meta { font-size:10.5px; color:#cbd5e1aa; text-align:right; margin-top:3px; }
+  .bubble.dm { border-color:#f59e0b; } .dmtag { font-size:11px; color:#fbbf24; font-weight:600; }
+  .bubble audio { width:230px; max-width:100%; height:36px; display:block; margin-top:2px; }
+  .sys { align-self:center; font-size:12px; color:var(--muted); background:#ffffff08; padding:4px 12px; border-radius:999px; margin:6px 0; text-align:center; }
+  .sys.err { color:var(--err); }
+  .day { align-self:center; font-size:11px; color:var(--muted); margin:10px 0; }
+  #typing { height:20px; padding:0 20px; font-size:12px; color:var(--muted); font-style:italic; }
+
+  footer { padding:12px 14px calc(12px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); display:flex; gap:8px; align-items:center; }
+  #dmChip { display:none; background:#78350f; color:#fde68a; font-size:12px; padding:6px 10px; border-radius:999px; white-space:nowrap; }
+  #dmChip button { background:none; color:inherit; padding:0 0 0 6px; }
+  #text { flex:1; min-width:0; background:var(--panel); border:1px solid var(--line); color:var(--text); padding:12px 14px; border-radius:12px; outline:none; }
+  #text:focus { border-color:var(--accent); }
+  #mic, #send { width:46px; height:46px; display:grid; place-items:center; font-size:18px; flex:none; }
+  #mic { background:var(--panel); color:var(--text); border:1px solid var(--line); }
+  #mic.rec { background:#b91c1c; border-color:#ef4444; animation:pulse 1s infinite; }
+  #send { background:var(--accent); color:#fff; }
+  #recInfo { display:none; color:#fca5a5; font-size:13px; font-variant-numeric:tabular-nums; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 6px #ef444433; } }
+
+  @media (max-width:760px) {
+    aside { position:fixed; inset:0 auto 0 0; z-index:5; transform:translateX(-100%); transition:transform .2s; box-shadow:10px 0 40px #0009; }
+    aside.open { transform:none; }
+    #menuBtn { display:block; }
+    .row { max-width:88%; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>VEIL TCP Chat</h1>
-  <input id="name" placeholder="username (2-20: letters, digits, _ -)" maxlength="20">
-  <button id="connect">Connect</button>
-  <button id="quit" class="secondary" disabled>Quit</button>
-  <button id="ping" class="secondary" disabled>Ping</button>
-  <span id="info">not connected</span>
-</header>
+<div id="login">
+  <div class="card">
+    <h1>VEIL TCP Chat</h1>
+    <p>Multi-user chat over TCP sockets</p>
+    <div id="loginErr"></div>
+    <input id="name" placeholder="Choose a username" maxlength="20" autocomplete="off">
+    <button id="connect">Join chat</button>
+    <small>2–20 characters: letters, digits, _ or -. Each user gets their own TCP connection to the chat server (browser → WebSocket over TLS → gateway → raw TCP :5000).</small>
+  </div>
+</div>
+
+<aside id="side">
+  <div class="brand"><div class="logo">V</div><div><b>VEIL TCP Chat</b><span id="onlineCount">0 online</span></div></div>
+  <div class="sect">Online — tap to DM</div>
+  <div id="users"></div>
+  <div class="me-box">
+    <div class="avatar on" id="meAv">?</div>
+    <div class="name"><span id="meName">—</span><small>connected</small></div>
+    <button class="iconbtn" id="quit" title="Leave (graceful close)">Leave</button>
+  </div>
+</aside>
+
 <main>
+  <div class="top">
+    <button class="iconbtn" id="menuBtn">☰</button>
+    <div class="title"><b># general</b><div id="info">connecting…</div></div>
+    <button class="iconbtn" id="ping" title="Measure round-trip time">⚡ Ping</button>
+  </div>
   <div id="log"></div>
-  <aside><h2>Online</h2><div id="users"></div></aside>
+  <div id="typing"></div>
+  <footer>
+    <span id="dmChip">DM → <b id="dmName"></b><button id="dmClear" title="Back to group">✕</button></span>
+    <span id="recInfo">● 0:00</span>
+    <input id="text" placeholder="Message #general" maxlength="1000" autocomplete="off">
+    <button id="mic" title="Record voice note">🎤</button>
+    <button id="send" title="Send">➤</button>
+  </footer>
 </main>
-<footer>
-  <input id="text" placeholder="Message everyone, or /dm user text" disabled maxlength="1000">
-  <button id="send" disabled>Send</button>
-</footer>
+
 <script>
 const $ = (id) => document.getElementById(id);
-let ws, me, online = new Set();
-const t = (ts) => new Date(ts).toLocaleTimeString();
-const scroll = () => { $("log").scrollTop = $("log").scrollHeight; };
-const line = (cls, text) => { const d = document.createElement("div"); d.className = cls; d.textContent = text; $("log").append(d); scroll(); };
-const bubble = (from, text, meta) => {
-  const d = document.createElement("div"); d.className = "msg" + (from === me ? " me" : "");
-  const m = document.createElement("div"); m.className = "meta"; m.textContent = meta;
-  const b = document.createElement("div"); b.textContent = text;
-  d.append(m, b); $("log").append(d); scroll();
-};
-const renderUsers = () => { $("users").textContent = ""; [...online].sort().forEach((u) => { const d = document.createElement("div"); d.textContent = (u === me ? "● " : "○ ") + u; $("users").append(d); }); };
-const setConnected = (on) => { $("connect").disabled = on; $("name").disabled = on; ["quit","ping","text","send"].forEach((id) => $(id).disabled = !on); };
+let ws, me = null, online = new Set(), dmTarget = null, lastFrom = null, lastDay = null;
+const typingUsers = new Map();
+const colors = ["#8b5cf6","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#14b8a6","#a855f7","#f97316","#06b6d4"];
+const colorFor = (n) => colors[[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length];
+const avatar = (n, on) => { const a = document.createElement("div"); a.className = "avatar" + (on ? " on" : ""); a.style.background = colorFor(n); a.textContent = n[0].toUpperCase(); return a; };
+const time = (ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const nearBottom = () => $("log").scrollHeight - $("log").scrollTop - $("log").clientHeight < 120;
+const scroll = (force) => { if (force || nearBottom()) $("log").scrollTop = $("log").scrollHeight; };
+
+function sys(text, err) { const d = document.createElement("div"); d.className = "sys" + (err ? " err" : ""); d.textContent = text; $("log").append(d); lastFrom = null; scroll(true); }
+function dayMark(ts) { const day = new Date(ts).toDateString(); if (day !== lastDay) { lastDay = day; const d = document.createElement("div"); d.className = "day"; d.textContent = day === new Date().toDateString() ? "Today" : day; $("log").append(d); lastFrom = null; } }
+
+function bubble(m, kind) {
+  const stick = nearBottom() || m.from === me;
+  dayMark(m.ts);
+  const mine = m.from === me;
+  const groupKey = kind + m.from + (m.to || "");
+  const row = document.createElement("div");
+  row.className = "row" + (mine ? " me" : "") + (lastFrom === groupKey ? " cont" : "");
+  lastFrom = groupKey;
+  const b = document.createElement("div"); b.className = "bubble" + (kind === "dm" ? " dm" : "");
+  const who = document.createElement("div"); who.className = "who"; who.style.color = colorFor(m.from); who.textContent = m.from;
+  b.append(who);
+  if (kind === "dm") { const t = document.createElement("div"); t.className = "dmtag"; t.textContent = mine ? `🔒 private to ${m.to}` : "🔒 private message"; b.append(t); }
+  if (kind === "voice") {
+    const au = document.createElement("audio"); au.controls = true; au.preload = "metadata"; au.src = m.data; b.append(au);
+  } else { const t = document.createElement("div"); t.className = "txt"; t.textContent = m.text; b.append(t); }
+  const meta = document.createElement("div"); meta.className = "meta";
+  meta.textContent = (kind === "voice" ? `🎤 ${m.duration}s · ` : "") + (m.seq ? `#${m.seq} · ` : "") + time(m.ts) + (m.history ? " · earlier" : "");
+  b.append(meta);
+  row.append(avatar(m.from, online.has(m.from)), b);
+  $("log").append(row); scroll(stick);
+}
+
+function renderUsers() {
+  $("users").textContent = "";
+  $("onlineCount").textContent = `${online.size} online`;
+  [...online].sort((a, b) => (a === me ? -1 : b === me ? 1 : a.localeCompare(b))).forEach((u) => {
+    const d = document.createElement("div"); d.className = "user";
+    const n = document.createElement("div"); n.className = "name"; n.textContent = u;
+    const tag = document.createElement("div"); tag.className = "tag"; tag.textContent = u === me ? "you" : "DM";
+    d.append(avatar(u, true), n, tag);
+    if (u !== me) d.onclick = () => { setDm(u); $("side").classList.remove("open"); };
+    $("users").append(d);
+  });
+}
+function setDm(u) { dmTarget = u; $("dmChip").style.display = u ? "inline-flex" : "none"; $("dmName").textContent = u || ""; $("text").placeholder = u ? `Private message to ${u}` : "Message #general"; $("text").focus(); }
+function renderTyping() { const now = Date.now(); for (const [u, t] of typingUsers) if (now - t > 3000) typingUsers.delete(u); const l = [...typingUsers.keys()]; $("typing").textContent = l.length ? `${l.join(", ")} ${l.length > 1 ? "are" : "is"} typing…` : ""; }
+setInterval(renderTyping, 1000);
+
 const send = (m) => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
 
-$("connect").onclick = () => {
+function connect() {
   const name = $("name").value.trim();
   if (!name) return $("name").focus();
+  $("loginErr").textContent = ""; $("connect").disabled = true; $("connect").textContent = "Connecting… (server may take ~50 s to wake)";
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-  $("info").textContent = "connecting…";
   ws.onopen = () => send({ type: "hello", username: name });
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     switch (m.type) {
-      case "gateway": $("info").textContent = `WebSocket ok · gateway opened TCP 127.0.0.1:${m.tcpLocalPort} → :${m.tcpServerPort}`; break;
+      case "gateway": $("info").textContent = `gateway TCP 127.0.0.1:${m.tcpLocalPort} → :${m.tcpServerPort}`; break;
       case "welcome":
-        me = m.username; online = new Set(m.users); renderUsers(); setConnected(true);
-        line("sys", `Welcome ${me}. TCP connection #${m.connectionId}: ${m.client.ip}:${m.client.port} → ${m.server.ip}:${m.server.port}`);
-        m.history.forEach((h) => bubble(h.from, h.text, `#${h.seq} ${h.from} · ${t(h.ts)} (history)`));
+        me = m.username; online = new Set(m.users); $("login").style.display = "none";
+        $("meName").textContent = me; const av = $("meAv"); av.textContent = me[0].toUpperCase(); av.style.background = colorFor(me);
+        $("info").textContent = `TCP #${m.connectionId} · ${m.client.ip}:${m.client.port} → ${m.server.ip}:${m.server.port}`;
+        renderUsers(); sys(`You joined as ${me}`);
+        m.history.forEach((h) => bubble({ ...h, history: true }, "msg"));
         $("text").focus(); break;
-      case "msg": bubble(m.from, m.text, `#${m.seq} ${m.from} · ${t(m.ts)}`); break;
-      case "dm": bubble(m.from, m.text, `DM ${m.from} → ${m.to} · ${t(m.ts)}`); break;
-      case "joined": online.add(m.username); renderUsers(); line("sys", `${m.username} joined`); break;
-      case "left": online.delete(m.username); renderUsers(); line("sys", `${m.username} left (${m.reason})`); break;
+      case "msg": typingUsers.delete(m.from); renderTyping(); bubble(m, "msg"); break;
+      case "voice": typingUsers.delete(m.from); renderTyping(); bubble(m, "voice"); break;
+      case "dm": bubble(m, "dm"); break;
+      case "typing": typingUsers.set(m.from, Date.now()); renderTyping(); break;
+      case "joined": online.add(m.username); renderUsers(); sys(`${m.username} joined`); break;
+      case "left": online.delete(m.username); typingUsers.delete(m.username); renderUsers(); sys(`${m.username} left (${m.reason})`); if (dmTarget === m.username) setDm(null); break;
       case "users": online = new Set(m.users); renderUsers(); break;
-      case "pong": line("sys", `RTT ${(performance.now() - Number(m.t)).toFixed(1)} ms (browser → Render → TCP server → back)`); break;
-      case "error": line("err", `${m.code}: ${m.message}`); break;
+      case "pong": sys(`⚡ Round-trip time ${(performance.now() - Number(m.t)).toFixed(0)} ms (browser → Render → TCP server → back)`); break;
+      case "error":
+        if (!me) { $("loginErr").textContent = m.message; $("connect").disabled = false; $("connect").textContent = "Join chat"; }
+        else sys(`${m.code}: ${m.message}`, true);
+        break;
     }
   };
-  ws.onclose = (e) => { setConnected(false); online.clear(); renderUsers(); line("sys", `Disconnected (code ${e.code})`); $("info").textContent = "not connected"; };
-  ws.onerror = () => line("err", "WebSocket error");
-};
+  ws.onclose = (e) => {
+    if (me) { sys(`Disconnected (code ${e.code})`); setTimeout(() => location.reload(), 1500); }
+    else { $("connect").disabled = false; $("connect").textContent = "Join chat"; if (!$("loginErr").textContent) $("loginErr").textContent = "Could not connect. Try again."; }
+  };
+}
+$("connect").onclick = connect;
+$("name").onkeydown = (e) => { if (e.key === "Enter") connect(); };
 $("quit").onclick = () => send({ type: "bye" });
 $("ping").onclick = () => send({ type: "ping", t: String(performance.now()) });
-const submit = () => {
+$("menuBtn").onclick = () => $("side").classList.toggle("open");
+$("dmClear").onclick = () => setDm(null);
+
+let lastTypingSent = 0;
+$("text").oninput = () => { if (Date.now() - lastTypingSent > 2000 && $("text").value) { lastTypingSent = Date.now(); send({ type: "typing" }); } };
+function submit() {
   const text = $("text").value.trim(); if (!text) return;
-  const dm = /^\/dm\s+(\S+)\s+(.+)$/.exec(text);
-  send(dm ? { type: "dm", to: dm[1], text: dm[2] } : { type: "msg", text });
-  $("text").value = "";
-};
+  const m = /^\/dm\s+(\S+)\s+(.+)$/.exec(text);
+  if (m) send({ type: "dm", to: m[1], text: m[2] });
+  else if (dmTarget) send({ type: "dm", to: dmTarget, text });
+  else send({ type: "msg", text });
+  $("text").value = ""; lastTypingSent = 0;
+}
 $("send").onclick = submit;
 $("text").onkeydown = (e) => { if (e.key === "Enter") submit(); };
-$("name").onkeydown = (e) => { if (e.key === "Enter") $("connect").click(); };
+
+// Voice notes: record with MediaRecorder, send as ONE TCP frame (base64 data URL).
+let rec = null, chunks = [], recStart = 0, recTimer = null;
+$("mic").onclick = async () => {
+  if (rec && rec.state === "recording") { rec.stop(); return; }
+  if (!navigator.mediaDevices || typeof MediaRecorder === "undefined") return sys("Voice notes are not supported in this browser.", true);
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return sys("Microphone permission denied.", true); }
+  const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 24000 });
+  chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec.onstop = () => {
+    clearInterval(recTimer); $("mic").classList.remove("rec"); $("mic").textContent = "🎤"; $("recInfo").style.display = "none"; $("text").style.display = "";
+    stream.getTracks().forEach((t) => t.stop());
+    const duration = Math.max(0.5, (Date.now() - recStart) / 1000);
+    const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (reader.result.length > 400 * 1024) return sys("Voice note too long (max ~60 s).", true);
+      send({ type: "voice", data: reader.result, duration: Math.round(duration * 10) / 10 });
+    };
+    reader.readAsDataURL(blob);
+  };
+  rec.start(); recStart = Date.now();
+  $("mic").classList.add("rec"); $("mic").textContent = "■"; $("recInfo").style.display = "inline"; $("text").style.display = "none";
+  recTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    $("recInfo").textContent = `● recording ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} — tap ■ to send`;
+    if (s >= 60) rec.stop();
+  }, 250);
+};
 </script>
 </body>
 </html>
