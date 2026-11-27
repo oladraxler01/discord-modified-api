@@ -266,6 +266,7 @@ fetch("/ice").then((r) => r.json()).then((j) => { if (j && j.iceServers) ICE = j
 const cand = { local: {}, remote: {} };
 const candType = (c) => (/ typ (\w+)/.exec(c || "") || [])[1] || "?";
 const candSummary = (o) => Object.entries(o).map(([k, v]) => `${k}×${v}`).join(", ") || "none";
+let relay = null, relayTimer = null; // TCP fallback: voice frames relayed through the chat server
 let pc = null, callPeer = null, localStream = null, pendingOffer = null, pendingCands = [], statsTimer = null, callStart = 0, lastBytes = null, finalStats = null;
 const sig = (to, signal) => send({ type: "call", to, signal });
 function showCall(peer, state, mode) {
@@ -286,8 +287,14 @@ async function makePc() {
   pc.ontrack = (e) => { $("remoteAudio").srcObject = e.streams[0]; $("remoteAudio").play().catch(() => {}); };
   pc.onconnectionstatechange = () => {
     const st = pc && pc.connectionState;
-    if (st === "connected") { callStart = Date.now(); showCall(callPeer, "connected · voice over UDP", "active"); sys(`📞 Call with ${callPeer} connected — audio is flowing peer-to-peer over UDP`); startStats(); }
+    if (st === "connected") { clearTimeout(relayTimer); if (relay) return; callStart = Date.now(); showCall(callPeer, "connected · voice over UDP", "active"); sys(`📞 Call with ${callPeer} connected — audio is flowing peer-to-peer over UDP`); startStats(); }
+    if (st === "disconnected") { // often recovers by itself; switch only if it stays down
+      setTimeout(() => { if (pc && pc.connectionState !== "connected" && callPeer && !relay) { sig(callPeer, { kind: "relay" }); startRelay("UDP path dropped"); } }, 5000);
+      return;
+    }
     if (st === "failed") {
+      if (callPeer && !relay) { sig(callPeer, { kind: "relay" }); startRelay(`UDP blocked (my paths: ${candSummary(cand.local)}; theirs: ${candSummary(cand.remote)})`); return; }
+      if (relay) return;
       const hasRelay = ICE.iceServers.some((x) => [].concat(x.urls).some((u) => String(u).startsWith("turn")));
       endCall(`UDP connection failed — my paths: ${candSummary(cand.local)}; theirs: ${candSummary(cand.remote)}. ` +
         (hasRelay ? "Even the TURN relay could not connect." : "No direct UDP path between these networks and no TURN relay configured: use two browsers on the same laptop, two devices on the same Wi-Fi (not the hotspot phone itself), or add a TURN server."), true);
@@ -312,7 +319,9 @@ async function onSignal(from, s) {
     return;
   }
   if (from !== callPeer) return;
-  if (s.kind === "answer" && pc) { await pc.setRemoteDescription({ type: "answer", sdp: s.sdp }); await flushCands(); showCall(callPeer, "connecting (ICE over UDP)…", "outgoing"); }
+  if (s.kind === "answer" && pc) { await pc.setRemoteDescription({ type: "answer", sdp: s.sdp }); await flushCands(); showCall(callPeer, "connecting (ICE over UDP)…", "outgoing"); armRelayTimer(); }
+  else if (s.kind === "relay") { if (!relay) startRelay("the other side could not reach me over UDP"); }
+  else if (s.kind === "audio") { if (!relay) startRelay("the other side switched to TCP relay"); playRelay(s); }
   else if (s.kind === "candidate") { const t = candType(s.candidate && s.candidate.candidate); cand.remote[t] = (cand.remote[t] || 0) + 1; if (pc && pc.remoteDescription) { try { await pc.addIceCandidate(s.candidate); } catch {} } else pendingCands.push(s.candidate); }
   else if (s.kind === "hangup") endCall(`${from} hung up`, false);
   else if (s.kind === "decline") endCall(`${from} declined`, false);
@@ -325,19 +334,23 @@ $("acceptBtn").onclick = async () => {
   const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
   sig(callPeer, { kind: "answer", sdp: pc.localDescription.sdp });
   showCall(callPeer, "connecting (ICE over UDP)…", "active");
+  armRelayTimer();
 };
 $("declineBtn").onclick = () => { sig(callPeer, { kind: "decline" }); endCall("declined", false); };
 $("hangBtn").onclick = () => endCall("you hung up", true);
 $("muteBtn").onclick = () => { if (!localStream) return; const t = localStream.getAudioTracks()[0]; t.enabled = !t.enabled; $("muteBtn").textContent = t.enabled ? "Mute" : "Unmute"; };
 function endCall(reason, notify) {
   if (notify && callPeer) sig(callPeer, { kind: "hangup" });
-  clearInterval(statsTimer); statsTimer = null;
+  clearInterval(statsTimer); statsTimer = null; clearTimeout(relayTimer);
+  if (relay) { try { relay.proc.disconnect(); relay.ctx.close(); } catch {} }
+  const rf = relay; relay = null;
   const peer = callPeer, dur = callStart ? Math.round((Date.now() - callStart) / 1000) : 0, f = finalStats;
   if (pc) pc.close(); pc = null;
   if (localStream) localStream.getTracks().forEach((t) => t.stop()); localStream = null;
   callPeer = null; pendingOffer = null; pendingCands = []; callStart = 0; lastBytes = null; finalStats = null; cand.local = {}; cand.remote = {};
   $("callPanel").style.display = "none"; $("udpStats").innerHTML = ""; $("muteBtn").textContent = "Mute";
-  if (peer) sys(`📞 Call with ${peer} ended (${reason})` + (dur ? ` · ${dur}s` : "") + (f ? ` · UDP: ${f.recv} packets received, ${f.lost} lost (${f.lossPct}%), jitter ${f.jitter} ms` : ""));
+  if (peer && rf) sys(`📞 Call with ${peer} ended (${reason}) · ${dur}s · TCP relay: ${rf.recv} frames received, ${rf.lost} lost`);
+  else if (peer) sys(`📞 Call with ${peer} ended (${reason})` + (dur ? ` · ${dur}s` : "") + (f ? ` · UDP: ${f.recv} packets received, ${f.lost} lost (${f.lossPct}%), jitter ${f.jitter} ms` : ""));
 }
 function startStats() {
   clearInterval(statsTimer);
@@ -373,6 +386,56 @@ function startStats() {
     $("udpStats").innerHTML = "";
     cells.forEach(([k, v, bad]) => { const d = document.createElement("div"); d.className = "stat" + (bad ? " bad" : ""); const a = document.createElement("span"); a.textContent = k; const b = document.createElement("b"); b.textContent = v; d.append(a, b); $("udpStats").append(d); });
   }, 1000);
+}
+
+function armRelayTimer() {
+  clearTimeout(relayTimer);
+  relayTimer = setTimeout(() => {
+    if (callPeer && !relay && (!pc || pc.connectionState !== "connected")) { sig(callPeer, { kind: "relay" }); startRelay("no UDP path after 8 s"); }
+  }, 8000);
+}
+// TCP fallback: 20 ms PCM frames (16 kHz) as base64 inside {"type":"call"} NDJSON frames over the TCP chat server.
+function startRelay(why) {
+  if (relay || !callPeer) return;
+  clearTimeout(relayTimer); clearInterval(statsTimer);
+  if (pc) { pc.close(); pc = null; }
+  const ctx = new AudioContext({ sampleRate: 16000 });
+  const src = ctx.createMediaStreamSource(localStream);
+  const proc = ctx.createScriptProcessor(1024, 1, 1); const g = ctx.createGain(); g.gain.value = 0;
+  src.connect(proc); proc.connect(g); g.connect(ctx.destination);
+  relay = { ctx, proc, q: new Int16Array(0), seq: 0, sent: 0, recv: 0, lost: 0, maxSeq: -1, playAt: 0, lastRecv: 0 };
+  proc.onaudioprocess = (e) => {
+    const inp = e.inputBuffer.getChannelData(0), track = localStream && localStream.getAudioTracks()[0], on = track && track.enabled;
+    const add = new Int16Array(inp.length); for (let i = 0; i < inp.length; i++) add[i] = on ? Math.max(-32768, Math.min(32767, inp[i] * 32767)) : 0;
+    const m = new Int16Array(relay.q.length + add.length); m.set(relay.q); m.set(add, relay.q.length); relay.q = m;
+    while (relay.q.length >= 320) {
+      const frame = relay.q.slice(0, 320); relay.q = relay.q.slice(320);
+      const bytes = new Uint8Array(frame.buffer); let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      sig(callPeer, { kind: "audio", seq: relay.seq++, pcm: btoa(bin) }); relay.sent++;
+    }
+  };
+  callStart = Date.now();
+  showCall(callPeer, "connected · voice via TCP relay (UDP was blocked)", "active");
+  sys(`📞 Call connected using TCP relay through Render — ${why}`);
+  statsTimer = setInterval(() => {
+    if (!relay) return;
+    const cells = [["Transport", "TCP relay (fallback)"], ["Path", "you → Render :443 → TCP :5000 → peer"], ["Frames sent", relay.sent], ["Frames received", relay.recv],
+      ["Frames lost", relay.lost, relay.lost > 0], ["Receiving", Date.now() - relay.lastRecv < 1000 ? "yes" : "waiting…"], ["Call time", Math.round((Date.now() - callStart) / 1000) + " s"]];
+    $("udpStats").innerHTML = "";
+    cells.forEach(([k, v, bad]) => { const d = document.createElement("div"); d.className = "stat" + (bad ? " bad" : ""); const a = document.createElement("span"); a.textContent = k; const b = document.createElement("b"); b.textContent = v; d.append(a, b); $("udpStats").append(d); });
+  }, 1000);
+}
+function playRelay(s) {
+  if (!relay || typeof s.pcm !== "string") return;
+  relay.recv++; relay.lastRecv = Date.now();
+  if (s.seq > relay.maxSeq + 1 && relay.maxSeq >= 0) relay.lost += s.seq - relay.maxSeq - 1;
+  if (s.seq > relay.maxSeq) relay.maxSeq = s.seq;
+  const bin = atob(s.pcm), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const i16 = new Int16Array(bytes.buffer), f = new Float32Array(i16.length); for (let i = 0; i < i16.length; i++) f[i] = i16[i] / 32768;
+  const ctx = relay.ctx, b = ctx.createBuffer(1, f.length, 16000); b.copyToChannel(f, 0);
+  const n = ctx.createBufferSource(); n.buffer = b; n.connect(ctx.destination);
+  const now = ctx.currentTime; if (relay.playAt < now + 0.04 || relay.playAt > now + 0.5) relay.playAt = now + 0.12;
+  n.start(relay.playAt); relay.playAt += f.length / 16000;
 }
 window.addEventListener("beforeunload", () => { if (callPeer) sig(callPeer, { kind: "hangup" }); });
 

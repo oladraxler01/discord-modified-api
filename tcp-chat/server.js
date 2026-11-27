@@ -140,7 +140,7 @@ const handleMessage = (client, msg) => {
         return sendError(client, "invalid_call", "Call signal must be an object.");
       }
       if (JSON.stringify(msg.signal).length > 64 * 1024) return sendError(client, "invalid_call", "Call signal too large.");
-      if (msg.signal.kind !== "candidate") {
+      if (msg.signal.kind !== "candidate" && msg.signal.kind !== "audio") {
         log("INFO", "call_signal", { from: client.username, to: target.username, kind: String(msg.signal.kind) });
       }
       send(target, { type: "call", from: client.username, signal: msg.signal });
