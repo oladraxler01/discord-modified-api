@@ -31,6 +31,21 @@ const httpServer = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/plain" });
     return res.end("ok");
   }
+  if (req.url === "/ice") {
+    // ICE servers for the browser's WebRTC voice call. STUN finds the public address;
+    // optional TURN (set TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL in Render) relays UDP
+    // when the two devices cannot reach each other directly (mobile data, hotspots, strict NAT).
+    const iceServers = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+    if (process.env.TURN_URLS) {
+      iceServers.push({
+        urls: process.env.TURN_URLS.split(",").map((u) => u.trim()).filter(Boolean),
+        username: process.env.TURN_USERNAME || "",
+        credential: process.env.TURN_CREDENTIAL || "",
+      });
+    }
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    return res.end(JSON.stringify({ iceServers }));
+  }
   if (req.url === "/" || req.url.startsWith("/?")) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(page);
